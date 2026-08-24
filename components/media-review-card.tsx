@@ -50,7 +50,6 @@ const FullscreenAudioPreview = ({ uri }: { uri: string }) => {
         <View style={styles.audioTrack}><View style={[styles.audioProgress, { width: `${progress * 100}%` }]} /></View>
         <View style={styles.audioTimeRow}><Text style={styles.audioTime}>{formatTime(status.currentTime)}</Text><Text style={styles.audioTime}>{formatTime(status.duration)}</Text></View>
       </View>
-      {status.error ? <Text style={styles.audioError}>Unable to play this audio file</Text> : null}
     </View>
   );
 };
@@ -163,5 +162,4 @@ const styles = StyleSheet.create({
   audioProgress: { height: '100%', borderRadius: 3, backgroundColor: '#FFFFFF' },
   audioTimeRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 },
   audioTime: { color: '#B0B0B0', fontSize: 12, fontWeight: '600' },
-  audioError: { marginTop: 14, color: '#FF6B6B', fontSize: 12, fontWeight: '600' },
 });
