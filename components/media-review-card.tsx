@@ -22,6 +22,7 @@ const VideoPlayerView = ({ uri, style }: VideoPlayerViewProps) => {
 const FullscreenAudioPreview = ({ uri }: { uri: string }) => {
   const player = useAudioPlayer(uri, { updateInterval: 250 });
   const status = useAudioPlayerStatus(player);
+  const [timelineWidth, setTimelineWidth] = useState(0);
 
   useEffect(() => {
     player.play();
@@ -38,13 +39,12 @@ const FullscreenAudioPreview = ({ uri }: { uri: string }) => {
 
   const seekBy = (seconds: number) => {
     if (!status.duration) return;
-    const target = Math.max(0, Math.min(status.duration, status.currentTime + seconds));
-    player.seekTo(target);
+    player.seekTo(Math.max(0, Math.min(status.duration, status.currentTime + seconds)));
   };
 
-  const seekToPosition = (locationX: number, width: number) => {
-    if (!status.duration || width <= 0) return;
-    const ratio = Math.max(0, Math.min(1, locationX / width));
+  const seekToPosition = (locationX: number) => {
+    if (!status.duration || timelineWidth <= 0) return;
+    const ratio = Math.max(0, Math.min(1, locationX / timelineWidth));
     player.seekTo(status.duration * ratio);
   };
 
@@ -54,23 +54,16 @@ const FullscreenAudioPreview = ({ uri }: { uri: string }) => {
     <View style={styles.audioPreview}>
       <View style={styles.audioIconCircle}><MaterialIcons name="audiotrack" size={72} color="#FFFFFF" /></View>
       <Text style={styles.audioLabel}>AUDIO FILE</Text>
-
       <View style={styles.audioControlsRow}>
-        <TouchableOpacity style={styles.audioSkipButton} onPress={() => seekBy(-10)} activeOpacity={0.8} accessibilityRole="button" accessibilityLabel="Back 10 seconds">
-          <MaterialIcons name="replay-10" size={30} color="#FFFFFF" />
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.audioPlayButton} onPress={togglePlayback} activeOpacity={0.8} accessibilityRole="button" accessibilityLabel={status.playing ? 'Pause audio' : 'Play audio'}>
-          <MaterialIcons name={status.playing ? 'pause' : 'play-arrow'} size={42} color="#FFFFFF" style={status.playing ? undefined : { marginLeft: 3 }} />
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.audioSkipButton} onPress={() => seekBy(10)} activeOpacity={0.8} accessibilityRole="button" accessibilityLabel="Forward 10 seconds">
-          <MaterialIcons name="forward-10" size={30} color="#FFFFFF" />
-        </TouchableOpacity>
+        <TouchableOpacity style={styles.audioSkipButton} onPress={() => seekBy(-10)} activeOpacity={0.8} accessibilityRole="button" accessibilityLabel="Back 10 seconds"><MaterialIcons name="replay-10" size={30} color="#FFFFFF" /></TouchableOpacity>
+        <TouchableOpacity style={styles.audioPlayButton} onPress={togglePlayback} activeOpacity={0.8} accessibilityRole="button" accessibilityLabel={status.playing ? 'Pause audio' : 'Play audio'}><MaterialIcons name={status.playing ? 'pause' : 'play-arrow'} size={42} color="#FFFFFF" style={status.playing ? undefined : { marginLeft: 3 }} /></TouchableOpacity>
+        <TouchableOpacity style={styles.audioSkipButton} onPress={() => seekBy(10)} activeOpacity={0.8} accessibilityRole="button" accessibilityLabel="Forward 10 seconds"><MaterialIcons name="forward-10" size={30} color="#FFFFFF" /></TouchableOpacity>
       </View>
-
       <TouchableOpacity
         style={styles.audioTimeline}
         activeOpacity={1}
-        onPress={(event) => seekToPosition(event.nativeEvent.locationX, event.nativeEvent.width)}
+        onLayout={(event) => setTimelineWidth(event.nativeEvent.layout.width)}
+        onPress={(event) => seekToPosition(event.nativeEvent.locationX)}
         accessibilityRole="adjustable"
         accessibilityLabel="Audio timeline"
       >
@@ -100,25 +93,13 @@ export const MediaReviewCard = forwardRef<MediaReviewCardRef, MediaReviewCardPro
     swipeRight: () => { translateX.value = withTiming(screenWidth * 1.5, { duration: 300 }, () => runOnJS(onSwipeRight)()); },
   }));
 
-  const panGesture = Gesture.Pan().enabled(isTop).onUpdate((event) => {
-    translateX.value = event.translationX; translateY.value = event.translationY;
-  }).onEnd((event) => {
-    if (event.translationX > SWIPE_THRESHOLD) {
-      translateX.value = withSpring(screenWidth * 1.5, { velocity: Math.max(event.velocityX, 800) }, () => runOnJS(onSwipeRight)());
-    } else if (event.translationX < -SWIPE_THRESHOLD) {
-      translateX.value = withSpring(-screenWidth * 1.5, { velocity: Math.min(event.velocityX, -800) }, () => runOnJS(onSwipeLeft)());
-    } else {
-      translateX.value = withSpring(0, { damping: 15 }); translateY.value = withSpring(0, { damping: 15 });
-    }
+  const panGesture = Gesture.Pan().enabled(isTop).onUpdate((event) => { translateX.value = event.translationX; translateY.value = event.translationY; }).onEnd((event) => {
+    if (event.translationX > SWIPE_THRESHOLD) translateX.value = withSpring(screenWidth * 1.5, { velocity: Math.max(event.velocityX, 800) }, () => runOnJS(onSwipeRight)());
+    else if (event.translationX < -SWIPE_THRESHOLD) translateX.value = withSpring(-screenWidth * 1.5, { velocity: Math.min(event.velocityX, -800) }, () => runOnJS(onSwipeLeft)());
+    else { translateX.value = withSpring(0, { damping: 15 }); translateY.value = withSpring(0, { damping: 15 }); }
   });
 
-  const animatedCardStyle = useAnimatedStyle(() => ({
-    transform: [
-      { translateX: translateX.value },
-      { translateY: translateY.value },
-      { rotate: `${interpolate(translateX.value, [-screenWidth, 0, screenWidth], [-maxRotation, 0, maxRotation], Extrapolation.CLAMP)}deg` },
-    ],
-  }));
+  const animatedCardStyle = useAnimatedStyle(() => ({ transform: [{ translateX: translateX.value }, { translateY: translateY.value }, { rotate: `${interpolate(translateX.value, [-screenWidth, 0, screenWidth], [-maxRotation, 0, maxRotation], Extrapolation.CLAMP)}deg` }] }));
   const animatedKeepBadgeStyle = useAnimatedStyle(() => ({ opacity: interpolate(translateX.value, [0, SWIPE_THRESHOLD * 0.7], [0, 1], Extrapolation.CLAMP) }));
   const animatedDeleteBadgeStyle = useAnimatedStyle(() => ({ opacity: interpolate(translateX.value, [-SWIPE_THRESHOLD * 0.7, 0], [1, 0], Extrapolation.CLAMP) }));
 
@@ -138,18 +119,11 @@ export const MediaReviewCard = forwardRef<MediaReviewCardRef, MediaReviewCardPro
     <GestureDetector gesture={combinedGesture}>
       <Animated.View style={[styles.cardWrapper, style, isTop && animatedCardStyle]}>
         <MediaPreviewContainer item={item} isTop={isTop} />
-        {isTop && <>
-          <Animated.View style={[styles.badgeContainer, styles.keepBadge, animatedKeepBadgeStyle]}><Text style={styles.keepText}>KEEP</Text></Animated.View>
-          <Animated.View style={[styles.badgeContainer, styles.deleteBadge, animatedDeleteBadgeStyle]}><Text style={styles.deleteText}>DELETE</Text></Animated.View>
-        </>}
-
+        {isTop && <><Animated.View style={[styles.badgeContainer, styles.keepBadge, animatedKeepBadgeStyle]}><Text style={styles.keepText}>KEEP</Text></Animated.View><Animated.View style={[styles.badgeContainer, styles.deleteBadge, animatedDeleteBadgeStyle]}><Text style={styles.deleteText}>DELETE</Text></Animated.View></>}
         <Modal visible={isPreviewVisible} transparent={false} animationType="slide" onRequestClose={closePreview}>
           <View style={styles.modalContainer}>
             <View style={styles.modalHeader}>
-              <View style={styles.modalMeta}>
-                <Text style={styles.modalTitle} numberOfLines={1}>{item.fileName}</Text>
-                <Text style={styles.modalSubtitle}>{(item.fileSize / (1024 * 1024)).toFixed(2)} MB</Text>
-              </View>
+              <View style={styles.modalMeta}><Text style={styles.modalTitle} numberOfLines={1}>{item.fileName}</Text><Text style={styles.modalSubtitle}>{(item.fileSize / (1024 * 1024)).toFixed(2)} MB</Text></View>
               <TouchableOpacity style={styles.closeButton} onPress={closePreview} activeOpacity={0.7}><MaterialIcons name="close" size={26} color="#FFFFFF" /></TouchableOpacity>
             </View>
             <View style={styles.modalContent}>
