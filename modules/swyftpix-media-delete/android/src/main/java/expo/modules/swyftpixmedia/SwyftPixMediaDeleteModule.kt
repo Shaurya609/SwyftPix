@@ -19,7 +19,9 @@ class SwyftPixMediaDeleteModule : Module() {
   companion object {
     private const val TAG = "SwyftPixMediaDelete"
     private const val DELETE_REQUEST_CODE = 47261
-    private val PROTECTED_PATH_PREFIXES = listOf("Android/", "Android/data/", "Android/obb/")
+    // Android/data and Android/obb are protected app/system areas. Android/media is shared storage
+    // and must remain discoverable so sources such as WhatsApp can be classified correctly.
+    private val PROTECTED_PATH_PREFIXES = listOf("Android/data/", "Android/obb/")
   }
 
   private var pendingPromise: Promise? = null
@@ -56,10 +58,7 @@ class SwyftPixMediaDeleteModule : Module() {
       if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return@Function true
       val activity = appContext.activityProvider?.currentActivity ?: return@Function false
       try {
-        val intent = Intent(
-          Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
-          Uri.parse("package:${context.packageName}")
-        )
+        val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, Uri.parse("package:${context.packageName}"))
         activity.startActivity(intent)
         true
       } catch (error: Exception) {
@@ -126,9 +125,8 @@ class SwyftPixMediaDeleteModule : Module() {
 
   private fun isProtectedRelativePath(relativePath: String): Boolean {
     val normalized = relativePath.replace('\\', '/').removePrefix("/")
-    return PROTECTED_PATH_PREFIXES.any { prefix ->
-      normalized.equals(prefix.removeSuffix("/"), true) || normalized.startsWith(prefix, true)
-    }
+    if (normalized.equals("Android", true)) return true
+    return PROTECTED_PATH_PREFIXES.any { prefix -> normalized.equals(prefix.removeSuffix("/"), true) || normalized.startsWith(prefix, true) }
   }
 
   private fun isSafeSharedFile(relativePath: String, fileName: String): Boolean {
@@ -145,11 +143,7 @@ class SwyftPixMediaDeleteModule : Module() {
       return emptyList()
     }
 
-    val collection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-      MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
-    } else {
-      MediaStore.Files.getContentUri("external")
-    }
+    val collection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY) else MediaStore.Files.getContentUri("external")
     val projection = arrayOf(
       MediaStore.Files.FileColumns._ID,
       MediaStore.Files.FileColumns.DISPLAY_NAME,
@@ -173,7 +167,7 @@ class SwyftPixMediaDeleteModule : Module() {
 
         while (cursor.moveToNext() && results.size < limit) {
           val mediaType = if (mediaTypeIndex >= 0) cursor.getInt(mediaTypeIndex) else MediaStore.Files.FileColumns.MEDIA_TYPE_NONE
-          // We want non-media files (NONE) and Android's document type, but not photos/videos/audio already handled by MediaLibrary.
+          // NONE covers APKs/archives/other files; DOCUMENT covers PDFs and office/text files.
           if (mediaType != MediaStore.Files.FileColumns.MEDIA_TYPE_NONE && mediaType != MediaStore.Files.FileColumns.MEDIA_TYPE_DOCUMENT) continue
 
           val name = cursor.getString(nameIndex) ?: continue
