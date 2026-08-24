@@ -162,13 +162,7 @@ class SwyftPixMediaDeleteModule : Module() {
     val results = mutableListOf<Bundle>()
     val seen = mutableSetOf<String>()
     try {
-      context.contentResolver.query(
-        collection,
-        projection,
-        null,
-        null,
-        "${MediaStore.Files.FileColumns.DATE_MODIFIED} DESC"
-      )?.use { cursor ->
+      context.contentResolver.query(collection, projection, null, null, "${MediaStore.Files.FileColumns.DATE_MODIFIED} DESC")?.use { cursor ->
         val idIndex = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns._ID)
         val nameIndex = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DISPLAY_NAME)
         val mimeIndex = cursor.getColumnIndex(MediaStore.Files.FileColumns.MIME_TYPE)
@@ -179,7 +173,8 @@ class SwyftPixMediaDeleteModule : Module() {
 
         while (cursor.moveToNext() && results.size < limit) {
           val mediaType = if (mediaTypeIndex >= 0) cursor.getInt(mediaTypeIndex) else MediaStore.Files.FileColumns.MEDIA_TYPE_NONE
-          if (mediaType != MediaStore.Files.FileColumns.MEDIA_TYPE_NONE) continue
+          // We want non-media files (NONE) and Android's document type, but not photos/videos/audio already handled by MediaLibrary.
+          if (mediaType != MediaStore.Files.FileColumns.MEDIA_TYPE_NONE && mediaType != MediaStore.Files.FileColumns.MEDIA_TYPE_DOCUMENT) continue
 
           val name = cursor.getString(nameIndex) ?: continue
           val relativePath = if (relativeIndex >= 0 && !cursor.isNull(relativeIndex)) cursor.getString(relativeIndex) else ""
@@ -220,10 +215,7 @@ class SwyftPixMediaDeleteModule : Module() {
       "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "csv", "rtf", "odt", "ods", "odp", "epub" -> "document"
       "zip", "rar", "7z", "tar", "gz", "bz2", "xz", "tgz" -> "archive"
       "apk", "xapk", "apks", "aab" -> "apk"
-      else -> if (
-        mimeType.startsWith("text/") || mimeType.contains("pdf") || mimeType.contains("document") ||
-        mimeType.contains("spreadsheet") || mimeType.contains("presentation")
-      ) "document" else "other"
+      else -> if (mimeType.startsWith("text/") || mimeType.contains("pdf") || mimeType.contains("document") || mimeType.contains("spreadsheet") || mimeType.contains("presentation")) "document" else "other"
     }
   }
 
@@ -241,13 +233,7 @@ class SwyftPixMediaDeleteModule : Module() {
     }
     val collection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY) else MediaStore.Files.getContentUri("external")
     return try {
-      resolver.query(
-        collection,
-        arrayOf(MediaStore.Files.FileColumns._ID, MediaStore.Files.FileColumns.DISPLAY_NAME, MediaStore.Files.FileColumns.RELATIVE_PATH),
-        "${MediaStore.Files.FileColumns.DISPLAY_NAME} = ? AND ${MediaStore.Files.FileColumns.RELATIVE_PATH} = ?",
-        arrayOf(fileName, relativePath),
-        null
-      )?.use { cursor ->
+      resolver.query(collection, arrayOf(MediaStore.Files.FileColumns._ID, MediaStore.Files.FileColumns.DISPLAY_NAME, MediaStore.Files.FileColumns.RELATIVE_PATH), "${MediaStore.Files.FileColumns.DISPLAY_NAME} = ? AND ${MediaStore.Files.FileColumns.RELATIVE_PATH} = ?", arrayOf(fileName, relativePath), null)?.use { cursor ->
         if (!cursor.moveToFirst()) return@use null
         val name = cursor.getString(cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DISPLAY_NAME))
         val storedRelativePath = cursor.getString(cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.RELATIVE_PATH))
@@ -264,13 +250,7 @@ class SwyftPixMediaDeleteModule : Module() {
     if (uri.scheme != "content" || uri.authority != "media") return null
     val resolver = context.contentResolver
     return try {
-      resolver.query(
-        uri,
-        arrayOf(MediaStore.Files.FileColumns.DISPLAY_NAME, MediaStore.Files.FileColumns.RELATIVE_PATH, MediaStore.Files.FileColumns.MEDIA_TYPE),
-        null,
-        null,
-        null
-      )?.use { cursor ->
+      resolver.query(uri, arrayOf(MediaStore.Files.FileColumns.DISPLAY_NAME, MediaStore.Files.FileColumns.RELATIVE_PATH, MediaStore.Files.FileColumns.MEDIA_TYPE), null, null, null)?.use { cursor ->
         if (!cursor.moveToFirst()) return@use null
         val name = cursor.getString(cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DISPLAY_NAME))
         val relativePath = cursor.getString(cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.RELATIVE_PATH))
@@ -285,21 +265,9 @@ class SwyftPixMediaDeleteModule : Module() {
     }
   }
 
-  private fun findInCollection(
-    resolver: android.content.ContentResolver,
-    collection: Uri,
-    label: String,
-    fileName: String,
-    relativePath: String
-  ): Uri? {
+  private fun findInCollection(resolver: android.content.ContentResolver, collection: Uri, label: String, fileName: String, relativePath: String): Uri? {
     return try {
-      resolver.query(
-        collection,
-        arrayOf(MediaStore.MediaColumns._ID, MediaStore.MediaColumns.DISPLAY_NAME, MediaStore.MediaColumns.RELATIVE_PATH),
-        "${MediaStore.MediaColumns.DISPLAY_NAME} = ? AND ${MediaStore.MediaColumns.RELATIVE_PATH} = ?",
-        arrayOf(fileName, relativePath),
-        null
-      )?.use { cursor ->
+      resolver.query(collection, arrayOf(MediaStore.MediaColumns._ID, MediaStore.MediaColumns.DISPLAY_NAME, MediaStore.MediaColumns.RELATIVE_PATH), "${MediaStore.MediaColumns.DISPLAY_NAME} = ? AND ${MediaStore.MediaColumns.RELATIVE_PATH} = ?", arrayOf(fileName, relativePath), null)?.use { cursor ->
         if (!cursor.moveToFirst()) null else ContentUris.withAppendedId(collection, cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)))
       }
     } catch (error: Exception) {
