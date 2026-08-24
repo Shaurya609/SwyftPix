@@ -46,7 +46,7 @@ export default function HomeScreen() {
   const [endCursor, setEndCursor] = useState<string | undefined>(undefined);
   const [hasNextPage, setHasNextPage] = useState(false);
   const [isLoadingDeviceMedia, setIsLoadingDeviceMedia] = useState(false);
-  const firstPageCache = useRef<Awaited<ReturnType<typeof fetchDeviceMediaPage>> | null>(null);
+  const firstPageCache = useRef(new Map<HomeCategory, Awaited<ReturnType<typeof fetchDeviceMediaPage>>>());
 
   const refreshMediaManagementAccess = useCallback(() => {
     if (Platform.OS !== 'android' || Platform.Version < 31) {
@@ -84,9 +84,9 @@ export default function HomeScreen() {
         return;
       }
 
-      const cached = firstPageCache.current;
-      const result = cached ?? await fetchDeviceMediaPage(40);
-      if (!cached) firstPageCache.current = result;
+      const cached = firstPageCache.current.get(category);
+      const result = cached ?? await fetchDeviceMediaPage(40, undefined, category);
+      if (!cached) firstPageCache.current.set(category, result);
 
       setItems(filterItems(result.items, category, reviewedIds));
       setEndCursor(result.endCursor);
@@ -110,22 +110,13 @@ export default function HomeScreen() {
           setHasMediaManagementAccess(true);
         } else {
           refreshMediaManagementAccess();
-          // Prefetch the first media page while the user is choosing a category.
-          // This keeps category entry responsive without blocking the home screen.
-          fetchDeviceMediaPage(40)
-            .then(result => { firstPageCache.current = result; })
-            .catch(err => console.error('[HomeScreen] Error prefetching device media:', err));
         }
       } catch (err) {
         console.error('[HomeScreen] Error initializing persistent review state:', err);
         const granted = await checkAndRequestPermissions();
         setHasPermission(granted);
-        if (granted) {
-          refreshMediaManagementAccess();
-          fetchDeviceMediaPage(40)
-            .then(result => { firstPageCache.current = result; })
-            .catch(prefetchErr => console.error('[HomeScreen] Error prefetching device media:', prefetchErr));
-        } else setHasMediaManagementAccess(true);
+        if (granted) refreshMediaManagementAccess();
+        else setHasMediaManagementAccess(true);
       }
     }
     init();
@@ -175,10 +166,10 @@ export default function HomeScreen() {
       setIsLoadingDeviceMedia(true);
       try {
         const reviewedIds = await getReviewedAssetIds();
-        const result = await fetchDeviceMediaPage(20, endCursor);
+        const result = await fetchDeviceMediaPage(20, endCursor, category);
         setItems(prev => {
           const existingIds = new Set(prev.map(i => i.id));
-          return [...prev, ...result.items.filter(item => matchesCategory(item, category) && !existingIds.has(item.id) && !reviewedIds.has(item.id))];
+          return [...prev, ...result.items.filter(item => !existingIds.has(item.id) && !reviewedIds.has(item.id))];
         });
         setEndCursor(result.endCursor);
         setHasNextPage(result.hasNextPage);
