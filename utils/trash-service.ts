@@ -2,6 +2,7 @@ import * as SQLite from 'expo-sqlite';
 import * as MediaLibrary from 'expo-media-library';
 import { MockMediaItem, TrashedAsset } from '@/types/media';
 import { deleteMediaByPath } from '@/modules/swyftpix-media-delete';
+import { deleteUserFile } from '@/utils/file-access';
 
 // Retention is a global Trash policy. 0 means never auto-delete.
 export const RETENTION_OPTIONS = [1, 7, 30, 60, 90, 0] as const;
@@ -82,8 +83,6 @@ export async function initialize(): Promise<void> {
       });
     }
 
-    // expires_at is derived data. Recalculate it for every existing Trash item
-    // from its original deleted_at timestamp using the current global policy.
     const retention = await readRetentionDays(db);
     const rows = await db.getAllAsync<{ id: string; deleted_at: string }>(`SELECT id, deleted_at FROM trashed_media;`);
     for (const row of rows) {
@@ -241,6 +240,23 @@ export async function permanentlyDeleteAsset(id: string): Promise<void> {
   const db = await getDb();
   const item = await db.getFirstAsync<TrashedMediaRow>(`SELECT * FROM trashed_media WHERE id = ?;`, [id]);
   if (!item) throw new Error('Trash record no longer exists.');
+
+  // SAF files were explicitly authorized by the user through the platform file picker.
+  // Never fall through to MediaLibrary for these items: doing so could remove the
+  // local Trash record without deleting the actual document.
+  if (item.id.startsWith('saf:')) {
+    try {
+      const deleted = await deleteUserFile(item.uri);
+      if (deleted) {
+        await removeTrashRecord(id);
+        return;
+      }
+      throw new Error('The selected file provider did not authorize deletion of this file.');
+    } catch (error) {
+      console.error(`[TrashService] SAF deletion failed for ${item.file_name}:`, error);
+      throw error instanceof Error ? error : new Error('Could not delete this user-authorized file.');
+    }
+  }
 
   try {
     console.log(`[TrashService] Requesting native MediaStore deletion for ${item.file_name}: ${item.uri}`);
