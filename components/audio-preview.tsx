@@ -24,28 +24,68 @@ export function AudioPreview({ uri }: AudioPreviewProps) {
     player.play();
   };
 
+  const seekBy = (seconds: number) => {
+    if (!status.duration) return;
+    const target = Math.max(0, Math.min(status.duration, status.currentTime + seconds));
+    player.seekTo(target);
+  };
+
+  const seekToPosition = (locationX: number, width: number) => {
+    if (!status.duration || width <= 0) return;
+    const ratio = Math.max(0, Math.min(1, locationX / width));
+    player.seekTo(status.duration * ratio);
+  };
+
   const progress = status.duration > 0
     ? Math.min(1, Math.max(0, status.currentTime / status.duration))
     : 0;
 
   return (
     <View style={styles.container}>
-      <TouchableOpacity
-        style={styles.playButton}
-        onPress={togglePlayback}
-        activeOpacity={0.8}
-        accessibilityRole="button"
-        accessibilityLabel={status.playing ? 'Pause audio' : 'Play audio'}
-      >
-        <MaterialIcons
-          name={status.playing ? 'pause' : 'play-arrow'}
-          size={42}
-          color="#FFFFFF"
-          style={status.playing ? undefined : { marginLeft: 3 }}
-        />
-      </TouchableOpacity>
+      <View style={styles.controlsRow}>
+        <TouchableOpacity
+          style={styles.skipButton}
+          onPress={() => seekBy(-10)}
+          activeOpacity={0.8}
+          accessibilityRole="button"
+          accessibilityLabel="Back 10 seconds"
+        >
+          <MaterialIcons name="replay-10" size={28} color="#6C5CE7" />
+        </TouchableOpacity>
 
-      <View style={styles.timelineContainer}>
+        <TouchableOpacity
+          style={styles.playButton}
+          onPress={togglePlayback}
+          activeOpacity={0.8}
+          accessibilityRole="button"
+          accessibilityLabel={status.playing ? 'Pause audio' : 'Play audio'}
+        >
+          <MaterialIcons
+            name={status.playing ? 'pause' : 'play-arrow'}
+            size={42}
+            color="#FFFFFF"
+            style={status.playing ? undefined : { marginLeft: 3 }}
+          />
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.skipButton}
+          onPress={() => seekBy(10)}
+          activeOpacity={0.8}
+          accessibilityRole="button"
+          accessibilityLabel="Forward 10 seconds"
+        >
+          <MaterialIcons name="forward-10" size={28} color="#6C5CE7" />
+        </TouchableOpacity>
+      </View>
+
+      <TouchableOpacity
+        style={styles.timelineContainer}
+        activeOpacity={1}
+        onPress={(event) => seekToPosition(event.nativeEvent.locationX, event.nativeEvent.width)}
+        accessibilityRole="adjustable"
+        accessibilityLabel="Audio timeline"
+      >
         <View style={styles.track}>
           <View style={[styles.progress, { width: `${progress * 100}%` }]} />
         </View>
@@ -53,7 +93,7 @@ export function AudioPreview({ uri }: AudioPreviewProps) {
           <Text style={styles.timeText}>{formatTime(status.currentTime)}</Text>
           <Text style={styles.timeText}>{formatTime(status.duration)}</Text>
         </View>
-      </View>
+      </TouchableOpacity>
     </View>
   );
 }
@@ -72,6 +112,21 @@ const styles = StyleSheet.create({
     maxWidth: 320,
     alignItems: 'center',
   },
+  controlsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 18,
+    marginBottom: 18,
+  },
+  skipButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(108, 92, 231, 0.1)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   playButton: {
     width: 78,
     height: 78,
@@ -84,20 +139,20 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.18,
     shadowRadius: 8,
     elevation: 4,
-    marginBottom: 20,
   },
   timelineContainer: {
     width: '100%',
+    paddingVertical: 8,
   },
   track: {
-    height: 5,
-    borderRadius: 3,
+    height: 7,
+    borderRadius: 4,
     overflow: 'hidden',
     backgroundColor: 'rgba(108, 92, 231, 0.22)',
   },
   progress: {
     height: '100%',
-    borderRadius: 3,
+    borderRadius: 4,
     backgroundColor: '#6C5CE7',
   },
   timeRow: {
