@@ -2,13 +2,8 @@ import * as MediaLibrary from 'expo-media-library';
 import { File } from 'expo-file-system';
 import { MockMediaItem, MediaType } from '../types/media';
 
-// Cache for albumId to albumTitle lookup to avoid calling getAlbumsAsync repeatedly
 let albumCache: Map<string, string> | null = null;
 
-/**
- * Request and check permission status for accessing media library.
- * Audio is included so the device index can grow beyond photos/videos.
- */
 export async function checkAndRequestPermissions(): Promise<boolean> {
   try {
     const { status, canAskAgain } = await MediaLibrary.getPermissionsAsync(false, ['photo', 'video', 'audio']);
@@ -29,9 +24,6 @@ export async function checkAndRequestPermissions(): Promise<boolean> {
   }
 }
 
-/**
- * Helper to build/refresh the album lookup cache
- */
 async function getAlbumMap(): Promise<Map<string, string>> {
   if (albumCache) {
     return albumCache;
@@ -52,9 +44,6 @@ async function getAlbumMap(): Promise<Map<string, string>> {
   return map;
 }
 
-/**
- * Classifies the origin/source folder of an asset based on album title and metadata.
- */
 function determineSource(
   asset: MediaLibrary.Asset,
   albumTitle?: string
@@ -87,38 +76,26 @@ function determineSource(
   return isVideo ? 'Videos' : 'Camera';
 }
 
-/**
- * Formats a media duration in seconds to "MM:SS" or "H:MM:SS".
- */
 function formatDuration(seconds: number): string {
   if (!seconds || isNaN(seconds) || seconds <= 0) return '0:00';
   const hrs = Math.floor(seconds / 3600);
   const mins = Math.floor((seconds % 3600) / 60);
   const secs = Math.floor(seconds % 60);
 
-  const formattedSecs = secs < 10 ? `0${secs}` : secs;
+  const formattedSecs = secs < 10 ? `0${secs}` : `${secs}`;
   if (hrs > 0) {
-    const formattedMins = mins < 10 ? `0${mins}` : mins;
+    const formattedMins = mins < 10 ? `0${mins}` : `${mins}`;
     return `${hrs}:${formattedMins}:${formattedSecs}`;
   }
   return `${mins}:${formattedSecs}`;
 }
 
-/**
- * Fetches the file size without requesting full MediaLibrary asset metadata.
- * Calling MediaLibrary.getAssetInfoAsync() on Android can trigger EXIF access,
- * which requires ACCESS_MEDIA_LOCATION. SwyftPix only needs the file size here,
- * so use the asset URI directly with the modern expo-file-system File API.
- */
 async function fetchAssetSize(assetId: string, fallbackUri?: string): Promise<number> {
-  if (!fallbackUri) {
-    return 0;
-  }
+  if (!fallbackUri) return 0;
 
   try {
     const file = new File(fallbackUri);
     const fileInfo = file.info();
-
     if (typeof fileInfo.size === 'number' && fileInfo.size > 0) {
       return fileInfo.size;
     }
@@ -129,31 +106,38 @@ async function fetchAssetSize(assetId: string, fallbackUri?: string): Promise<nu
   return 0;
 }
 
-/**
- * Fetches a paginated batch of device photos, videos, and audio, then transforms
- * them into the normalized SwyftPixAsset-compatible structure.
- */
 export interface FetchPageResult {
   items: MockMediaItem[];
   endCursor: string;
   hasNextPage: boolean;
 }
 
+export type DeviceMediaCategory = 'photo' | 'video' | 'audio' | 'all';
+
 export async function fetchDeviceMediaPage(
   limit: number,
-  afterAssetId?: string
+  afterAssetId?: string,
+  category: DeviceMediaCategory = 'all'
 ): Promise<FetchPageResult> {
   try {
     const albumMap = await getAlbumMap();
 
+    const mediaType = category === 'photo'
+      ? [MediaLibrary.MediaType.photo]
+      : category === 'video'
+        ? [MediaLibrary.MediaType.video]
+        : category === 'audio'
+          ? [MediaLibrary.MediaType.audio]
+          : [
+              MediaLibrary.MediaType.photo,
+              MediaLibrary.MediaType.video,
+              MediaLibrary.MediaType.audio,
+            ];
+
     const pagedAssets = await MediaLibrary.getAssetsAsync({
       first: limit,
       after: afterAssetId,
-      mediaType: [
-        MediaLibrary.MediaType.photo,
-        MediaLibrary.MediaType.video,
-        MediaLibrary.MediaType.audio,
-      ],
+      mediaType,
       sortBy: [MediaLibrary.SortBy.creationTime],
     });
 
@@ -172,28 +156,28 @@ export async function fetchDeviceMediaPage(
         const isAudio = asset.mediaType === 'audio';
 
         let fileType: MediaType;
-        let category: MockMediaItem['category'];
+        let itemCategory: MockMediaItem['category'];
 
         if (isVideo) {
           fileType = 'video';
-          category = 'video';
+          itemCategory = 'video';
         } else if (isAudio) {
           fileType = 'audio';
-          category = 'audio';
+          itemCategory = 'audio';
         } else {
           fileType = source === 'Screenshots'
             ? 'screenshot'
             : source === 'WhatsApp'
               ? 'whatsapp'
               : 'photo';
-          category = 'photo';
+          itemCategory = 'photo';
         }
 
         const item: MockMediaItem = {
           id: asset.id,
           fileName: asset.filename || `MEDIA_${asset.id}`,
           fileType,
-          category,
+          category: itemCategory,
           fileSize: finalSize,
           dateCreated: dateCreatedStr,
           source,
