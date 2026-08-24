@@ -116,9 +116,13 @@ function nativeFileCategory(category: DeviceMediaCategory): NativeFileCategory {
   return category === 'document' || category === 'archive' || category === 'apk' || category === 'other' ? category : 'all';
 }
 
-function mapSharedFiles(category: DeviceMediaCategory): MockMediaItem[] {
+async function mapSharedFiles(category: DeviceMediaCategory): Promise<MockMediaItem[]> {
   const nativeCategory = nativeFileCategory(category);
-  const nativeFiles = [...listSharedFiles(nativeCategory, 40), ...listUserFiles(nativeCategory, 80)];
+  const [mediaStoreFiles, userFiles] = await Promise.all([
+    Promise.resolve(listSharedFiles(nativeCategory, 40)),
+    listUserFiles(nativeCategory, 80),
+  ]);
+  const nativeFiles = [...mediaStoreFiles, ...userFiles];
   const seen = new Set<string>();
   return nativeFiles.filter(file => {
     if (seen.has(file.uri)) return false;
@@ -146,7 +150,7 @@ function mapSharedFiles(category: DeviceMediaCategory): MockMediaItem[] {
 export async function fetchDeviceMediaPage(limit: number, afterAssetId?: string, category: DeviceMediaCategory = 'all'): Promise<FetchPageResult> {
   try {
     const isFileCategory = category === 'document' || category === 'archive' || category === 'apk' || category === 'other';
-    if (isFileCategory) return { items: mapSharedFiles(category).slice(0, limit), endCursor: '', hasNextPage: false };
+    if (isFileCategory) return { items: (await mapSharedFiles(category)).slice(0, limit), endCursor: '', hasNextPage: false };
 
     const albumMap = await getAlbumMap();
     const mediaType = category === 'photo'
@@ -183,7 +187,7 @@ export async function fetchDeviceMediaPage(limit: number, afterAssetId?: string,
 
     if (category !== 'all') return { items: mappedMedia, endCursor: pagedAssets.endCursor, hasNextPage: pagedAssets.hasNextPage };
 
-    const sharedFiles = mapSharedFiles('all');
+    const sharedFiles = await mapSharedFiles('all');
     const items = [...mappedMedia, ...sharedFiles].sort((a, b) => new Date(b.dateCreated).getTime() - new Date(a.dateCreated).getTime()).slice(0, limit);
     return { items, endCursor: pagedAssets.endCursor, hasNextPage: pagedAssets.hasNextPage };
   } catch (error) {
