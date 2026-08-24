@@ -191,7 +191,11 @@ async function findAssetForTrashItem(item: TrashedMediaRow): Promise<MediaLibrar
       const result = await MediaLibrary.getAssetsAsync({
         first: 100,
         after,
-        mediaType: [MediaLibrary.MediaType.photo, MediaLibrary.MediaType.video],
+        mediaType: [
+          MediaLibrary.MediaType.photo,
+          MediaLibrary.MediaType.video,
+          MediaLibrary.MediaType.audio,
+        ],
         sortBy: [MediaLibrary.SortBy.creationTime],
       });
       const match = result.assets.find(asset => asset.uri === item.uri)
