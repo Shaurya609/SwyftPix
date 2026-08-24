@@ -16,11 +16,7 @@ class SwyftPixMediaDeleteModule : Module() {
   companion object {
     private const val TAG = "SwyftPixMediaDelete"
     private const val DELETE_REQUEST_CODE = 47261
-    private val PROTECTED_PATH_PREFIXES = listOf(
-      "Android/",
-      "Android/data/",
-      "Android/obb/"
-    )
+    private val PROTECTED_PATH_PREFIXES = listOf("Android/", "Android/data/", "Android/obb/")
   }
 
   private var pendingPromise: Promise? = null
@@ -40,10 +36,7 @@ class SwyftPixMediaDeleteModule : Module() {
       if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return@Function false
       val activity = appContext.activityProvider?.currentActivity ?: return@Function false
       try {
-        val intent = android.content.Intent(
-          android.provider.Settings.ACTION_REQUEST_MANAGE_MEDIA,
-          Uri.parse("package:${context.packageName}")
-        )
+        val intent = android.content.Intent(android.provider.Settings.ACTION_REQUEST_MANAGE_MEDIA, Uri.parse("package:${context.packageName}"))
         activity.startActivity(intent)
         true
       } catch (error: Exception) {
@@ -61,60 +54,42 @@ class SwyftPixMediaDeleteModule : Module() {
         promise.reject("E_DELETE_BUSY", "Another media deletion is awaiting Android authorization.", null)
         return@AsyncFunction
       }
-
       Log.d(TAG, "deleteMediaByPath input=$path")
       val mediaUri = findMediaUri(path)
-      Log.d(TAG, "resolved safe mediaUri=$mediaUri")
       if (mediaUri == null) {
         Log.w(TAG, "Refusing deletion: file is outside SwyftPix's safe user-file scope")
         promise.resolve(false)
         return@AsyncFunction
       }
-
       val resolver = context.contentResolver
       try {
         val deleted = resolver.delete(mediaUri, null, null)
-        Log.d(TAG, "ContentResolver.delete uri=$mediaUri result=$deleted")
         if (deleted > 0) {
           promise.resolve(true)
           return@AsyncFunction
         }
       } catch (error: SecurityException) {
         Log.w(TAG, "Direct MediaStore delete requires authorization", error)
-      } catch (error: UnsupportedOperationException) {
-        Log.w(TAG, "Direct MediaStore delete unsupported", error)
       } catch (error: Exception) {
         Log.w(TAG, "Direct MediaStore delete failed", error)
       }
-
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
         val activity = appContext.activityProvider?.currentActivity
         if (activity == null) {
           promise.reject("E_NO_ACTIVITY", "No foreground Android activity is available for media deletion authorization.", null)
           return@AsyncFunction
         }
-
         try {
-          Log.d(TAG, "Starting MediaStore.createDeleteRequest for $mediaUri")
           val request = MediaStore.createDeleteRequest(resolver, listOf(mediaUri))
           pendingPromise = promise
-          activity.startIntentSenderForResult(
-            request.intentSender,
-            DELETE_REQUEST_CODE,
-            null,
-            0,
-            0,
-            0
-          )
+          activity.startIntentSenderForResult(request.intentSender, DELETE_REQUEST_CODE, null, 0, 0, 0)
           return@AsyncFunction
         } catch (error: Exception) {
           pendingPromise = null
-          Log.e(TAG, "Could not start Android delete request", error)
           promise.reject("E_DELETE_REQUEST", "Could not start Android media deletion authorization.", error)
           return@AsyncFunction
         }
       }
-
       promise.resolve(false)
     }
 
@@ -122,20 +97,20 @@ class SwyftPixMediaDeleteModule : Module() {
       if (payload.requestCode != DELETE_REQUEST_CODE) return@OnActivityResult
       val promise = pendingPromise
       pendingPromise = null
-      Log.d(TAG, "Android delete request resultCode=${payload.resultCode}")
       promise?.resolve(payload.resultCode == Activity.RESULT_OK)
     }
   }
 
   private fun isProtectedRelativePath(relativePath: String): Boolean {
     val normalized = relativePath.replace('\\', '/').removePrefix("/")
-    return PROTECTED_PATH_PREFIXES.any { prefix -> normalized.equals(prefix.removeSuffix("/"), true) || normalized.startsWith(prefix, true) }
+    return PROTECTED_PATH_PREFIXES.any { prefix ->
+      normalized.equals(prefix.removeSuffix("/"), true) || normalized.startsWith(prefix, true)
+    }
   }
 
   private fun isSafeSharedFile(relativePath: String, fileName: String): Boolean {
     if (fileName.startsWith(".")) return false
-    if (relativePath.isBlank()) return false
-    if (isProtectedRelativePath(relativePath)) return false
+    if (relativePath.isBlank() || isProtectedRelativePath(relativePath)) return false
     return true
   }
 
@@ -150,16 +125,9 @@ class SwyftPixMediaDeleteModule : Module() {
       MediaStore.Files.FileColumns.RELATIVE_PATH,
       MediaStore.Files.FileColumns.MEDIA_TYPE
     )
-
     val results = mutableListOf<Bundle>()
     try {
-      context.contentResolver.query(
-        collection,
-        projection,
-        null,
-        null,
-        "${MediaStore.Files.FileColumns.DATE_MODIFIED} DESC"
-      )?.use { cursor ->
+      context.contentResolver.query(collection, projection, null, null, "${MediaStore.Files.FileColumns.DATE_MODIFIED} DESC")?.use { cursor ->
         val idIndex = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns._ID)
         val nameIndex = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DISPLAY_NAME)
         val mimeIndex = cursor.getColumnIndex(MediaStore.Files.FileColumns.MIME_TYPE)
@@ -169,23 +137,18 @@ class SwyftPixMediaDeleteModule : Module() {
         val mediaTypeIndex = cursor.getColumnIndex(MediaStore.Files.FileColumns.MEDIA_TYPE)
 
         while (cursor.moveToNext() && results.size < limit) {
-          val mediaType = if (mediaTypeIndex >= 0) cursor.getInt(mediaTypeIndex) else 0
+          val mediaType = if (mediaTypeIndex >= 0) cursor.getInt(mediaTypeIndex) else MediaStore.Files.FileColumns.MEDIA_TYPE_NONE
           if (mediaType != MediaStore.Files.FileColumns.MEDIA_TYPE_NONE) continue
-
           val name = cursor.getString(nameIndex) ?: continue
           val relativePath = if (relativeIndex >= 0 && !cursor.isNull(relativeIndex)) cursor.getString(relativeIndex) else ""
           if (!isSafeSharedFile(relativePath, name)) continue
-
           val mimeType = if (mimeIndex >= 0 && !cursor.isNull(mimeIndex)) cursor.getString(mimeIndex) else "application/octet-stream"
           val fileCategory = classifyFile(name, mimeType)
-          if (fileCategory == "other") continue
-          if (fileCategory != category && category != "all") continue
-
+          if (category != "all" && fileCategory != category) continue
           val id = cursor.getLong(idIndex)
           val uri = ContentUris.withAppendedId(collection, id).toString()
           val size = if (sizeIndex >= 0 && !cursor.isNull(sizeIndex)) cursor.getLong(sizeIndex) else 0L
           val modifiedSeconds = if (modifiedIndex >= 0 && !cursor.isNull(modifiedIndex)) cursor.getLong(modifiedIndex) else 0L
-
           results.add(Bundle().apply {
             putString("id", "file:$id")
             putString("fileName", name)
@@ -201,7 +164,6 @@ class SwyftPixMediaDeleteModule : Module() {
     } catch (error: Exception) {
       Log.w(TAG, "Shared non-media file query failed", error)
     }
-
     Log.d(TAG, "listSharedFiles category=$category count=${results.size}")
     return results
   }
@@ -218,36 +180,24 @@ class SwyftPixMediaDeleteModule : Module() {
 
   private fun findMediaUri(rawPath: String): Uri? {
     if (rawPath.startsWith("content://")) return validateContentUri(Uri.parse(rawPath))
-
     val targetPath = Uri.parse(rawPath).path ?: rawPath
     val fileName = targetPath.substringAfterLast('/')
     val relativePath = relativePathFor(targetPath)
     if (!isSafeSharedFile(relativePath, fileName)) return null
-
     val resolver = context.contentResolver
-    Log.d(TAG, "lookup targetPath=$targetPath fileName=$fileName relativePath=$relativePath sdk=${Build.VERSION.SDK_INT}")
-
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
       findInCollection(resolver, MediaStore.Images.Media.EXTERNAL_CONTENT_URI, "images", fileName, relativePath)?.let { return it }
       findInCollection(resolver, MediaStore.Video.Media.EXTERNAL_CONTENT_URI, "videos", fileName, relativePath)?.let { return it }
       findInCollection(resolver, MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, "audio", fileName, relativePath)?.let { return it }
     }
-
     val collection = MediaStore.Files.getContentUri("external")
-    val projection = arrayOf(
-      MediaStore.Files.FileColumns._ID,
-      MediaStore.Files.FileColumns.MEDIA_TYPE,
-      MediaStore.Files.FileColumns.DISPLAY_NAME,
-      MediaStore.Files.FileColumns.RELATIVE_PATH
-    )
     return try {
-      resolver.query(collection, projection, "${MediaStore.Files.FileColumns.DISPLAY_NAME} = ? AND ${MediaStore.Files.FileColumns.RELATIVE_PATH} = ?", arrayOf(fileName, relativePath), null)?.use { cursor ->
+      resolver.query(collection, arrayOf(MediaStore.Files.FileColumns._ID, MediaStore.Files.FileColumns.DISPLAY_NAME, MediaStore.Files.FileColumns.RELATIVE_PATH), "${MediaStore.Files.FileColumns.DISPLAY_NAME} = ? AND ${MediaStore.Files.FileColumns.RELATIVE_PATH} = ?", arrayOf(fileName, relativePath), null)?.use { cursor ->
         if (!cursor.moveToFirst()) return@use null
         val name = cursor.getString(cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DISPLAY_NAME))
         val storedRelativePath = cursor.getString(cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.RELATIVE_PATH))
         if (!isSafeSharedFile(storedRelativePath, name)) return@use null
-        val id = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns._ID))
-        ContentUris.withAppendedId(collection, id)
+        ContentUris.withAppendedId(collection, cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns._ID)))
       }
     } catch (error: Exception) {
       Log.w(TAG, "safe MediaStore file lookup failed", error)
@@ -259,12 +209,7 @@ class SwyftPixMediaDeleteModule : Module() {
     if (uri.scheme != "content" || uri.authority != "media") return null
     val resolver = context.contentResolver
     return try {
-      val projection = arrayOf(
-        MediaStore.Files.FileColumns.DISPLAY_NAME,
-        MediaStore.Files.FileColumns.RELATIVE_PATH,
-        MediaStore.Files.FileColumns.MEDIA_TYPE
-      )
-      resolver.query(uri, projection, null, null, null)?.use { cursor ->
+      resolver.query(uri, arrayOf(MediaStore.Files.FileColumns.DISPLAY_NAME, MediaStore.Files.FileColumns.RELATIVE_PATH, MediaStore.Files.FileColumns.MEDIA_TYPE), null, null, null)?.use { cursor ->
         if (!cursor.moveToFirst()) return@use null
         val name = cursor.getString(cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DISPLAY_NAME))
         val relativePath = cursor.getString(cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.RELATIVE_PATH))
