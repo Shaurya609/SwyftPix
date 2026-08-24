@@ -32,13 +32,9 @@ const FullscreenAudioPreview = ({ uri }: { uri: string }) => {
   const [timelineWidth, setTimelineWidth] = useState(0);
 
   useEffect(() => {
-    setIsAudioActiveAsync(true)
-      .catch((error) => console.warn('[AudioPreview] Unable to activate audio:', error));
+    setIsAudioActiveAsync(true).catch((error) => console.warn('[AudioPreview] Unable to activate audio:', error));
     player.play();
-
-    return () => {
-      setIsAudioActiveAsync(false).catch(() => {});
-    };
+    return () => { setIsAudioActiveAsync(false).catch(() => {}); };
   }, [player]);
 
   const togglePlayback = () => {
@@ -70,14 +66,7 @@ const FullscreenAudioPreview = ({ uri }: { uri: string }) => {
         <TouchableOpacity style={styles.audioPlayButton} onPress={togglePlayback} activeOpacity={0.8} accessibilityRole="button" accessibilityLabel={status.playing ? 'Pause audio' : 'Play audio'}><MaterialIcons name={status.playing ? 'pause' : 'play-arrow'} size={42} color="#FFFFFF" style={status.playing ? undefined : { marginLeft: 3 }} /></TouchableOpacity>
         <TouchableOpacity style={styles.audioSkipButton} onPress={() => seekBy(10)} activeOpacity={0.8} accessibilityRole="button" accessibilityLabel="Forward 10 seconds"><MaterialIcons name="forward-10" size={30} color="#FFFFFF" /></TouchableOpacity>
       </View>
-      <TouchableOpacity
-        style={styles.audioTimeline}
-        activeOpacity={1}
-        onLayout={(event) => setTimelineWidth(event.nativeEvent.layout.width)}
-        onPress={(event) => seekToPosition(event.nativeEvent.locationX)}
-        accessibilityRole="adjustable"
-        accessibilityLabel="Audio timeline"
-      >
+      <TouchableOpacity style={styles.audioTimeline} activeOpacity={1} onLayout={(event) => setTimelineWidth(event.nativeEvent.layout.width)} onPress={(event) => seekToPosition(event.nativeEvent.locationX)} accessibilityRole="adjustable" accessibilityLabel="Audio timeline">
         <View style={styles.audioTrack}>
           <View style={[styles.audioProgress, { width: `${progress * 100}%` }]} />
           <View style={[styles.audioThumb, { left: `${progress * 100}%` }]} />
@@ -94,7 +83,7 @@ function formatTime(seconds: number): string {
   return `${Math.floor(wholeSeconds / 60)}:${(wholeSeconds % 60).toString().padStart(2, '0')}`;
 }
 
-export const MediaReviewCard = forwardRef<MediaReviewCardRef, MediaReviewCardProps>(({ items, onSwipeLeft, onSwipeRight }, ref) => {
+export const MediaReviewCard = forwardRef<MediaReviewCardRef, MediaReviewCardProps>(({ items, onSwipeLeft, onSwipeRight, onUndo, onReset }, ref) => {
   const { width: screenWidth } = useWindowDimensions();
   const SWIPE_THRESHOLD = screenWidth * 0.35;
   const item = items[0]!;
@@ -108,6 +97,14 @@ export const MediaReviewCard = forwardRef<MediaReviewCardRef, MediaReviewCardPro
     swipeLeft: () => { translateX.value = withTiming(-screenWidth * 1.5, { duration: 300 }, () => runOnJS(onSwipeLeft)(item)); },
     swipeRight: () => { translateX.value = withTiming(screenWidth * 1.5, { duration: 300 }, () => runOnJS(onSwipeRight)(item)); },
   }), [item, onSwipeLeft, onSwipeRight, screenWidth]);
+
+  const animateSwipe = (direction: 'left' | 'right') => {
+    const target = direction === 'right' ? screenWidth * 1.5 : -screenWidth * 1.5;
+    translateX.value = withTiming(target, { duration: 250 }, () => {
+      if (direction === 'right') runOnJS(onSwipeRight)(item);
+      else runOnJS(onSwipeLeft)(item);
+    });
+  };
 
   const panGesture = Gesture.Pan().enabled(!!item).onUpdate((event) => { translateX.value = event.translationX; translateY.value = event.translationY; }).onEnd((event) => {
     if (event.translationX > SWIPE_THRESHOLD) translateX.value = withSpring(screenWidth * 1.5, { velocity: Math.max(event.velocityX, 800) }, () => runOnJS(onSwipeRight)(item));
@@ -134,37 +131,52 @@ export const MediaReviewCard = forwardRef<MediaReviewCardRef, MediaReviewCardPro
   if (!item) return null;
 
   return (
-    <GestureDetector gesture={combinedGesture}>
-      <View style={styles.stackContainer}>
-        {nextItem ? (
-          <View style={[styles.cardWrapper, styles.backCard]}>
-            <MediaPreviewContainer item={nextItem} isTop={false} />
-          </View>
-        ) : null}
-        <Animated.View style={[styles.cardWrapper, animatedCardStyle]}>
-          <MediaPreviewContainer item={item} isTop />
-          <Animated.View style={[styles.badgeContainer, styles.keepBadge, animatedKeepBadgeStyle]}><Text style={styles.keepText}>KEEP</Text></Animated.View>
-          <Animated.View style={[styles.badgeContainer, styles.deleteBadge, animatedDeleteBadgeStyle]}><Text style={styles.deleteText}>DELETE</Text></Animated.View>
-          <Modal visible={isPreviewVisible} transparent={false} animationType="slide" onRequestClose={closePreview}>
-            <View style={styles.modalContainer}>
-              <View style={styles.modalHeader}>
-                <View style={styles.modalMeta}><Text style={styles.modalTitle} numberOfLines={1}>{item.fileName}</Text><Text style={styles.modalSubtitle}>{(item.fileSize / (1024 * 1024)).toFixed(2)} MB</Text></View>
-                <TouchableOpacity style={styles.closeButton} onPress={closePreview} activeOpacity={0.7}><MaterialIcons name="close" size={26} color="#FFFFFF" /></TouchableOpacity>
+    <View style={styles.reviewContainer}>
+      <GestureDetector gesture={combinedGesture}>
+        <View style={styles.stackContainer}>
+          {nextItem ? (
+            <View style={[styles.cardWrapper, styles.backCard]}><MediaPreviewContainer item={nextItem} isTop={false} /></View>
+          ) : null}
+          <Animated.View style={[styles.cardWrapper, animatedCardStyle]}>
+            <MediaPreviewContainer item={item} isTop />
+            <Animated.View style={[styles.badgeContainer, styles.keepBadge, animatedKeepBadgeStyle]}><Text style={styles.keepText}>KEEP</Text></Animated.View>
+            <Animated.View style={[styles.badgeContainer, styles.deleteBadge, animatedDeleteBadgeStyle]}><Text style={styles.deleteText}>DELETE</Text></Animated.View>
+            <Modal visible={isPreviewVisible} transparent={false} animationType="slide" onRequestClose={closePreview}>
+              <View style={styles.modalContainer}>
+                <View style={styles.modalHeader}>
+                  <View style={styles.modalMeta}><Text style={styles.modalTitle} numberOfLines={1}>{item.fileName}</Text><Text style={styles.modalSubtitle}>{(item.fileSize / (1024 * 1024)).toFixed(2)} MB</Text></View>
+                  <TouchableOpacity style={styles.closeButton} onPress={closePreview} activeOpacity={0.7}><MaterialIcons name="close" size={26} color="#FFFFFF" /></TouchableOpacity>
+                </View>
+                <View style={styles.modalContent}>
+                  {item.fileType === 'video' ? <VideoPlayerView uri={item.uri} style={styles.fullVideo} /> : item.fileType === 'audio' ? <FullscreenAudioPreview uri={item.uri} /> : <Image source={{ uri: item.uri }} style={styles.fullImage} contentFit="contain" />}
+                </View>
               </View>
-              <View style={styles.modalContent}>
-                {item.fileType === 'video' ? <VideoPlayerView uri={item.uri} style={styles.fullVideo} /> : item.fileType === 'audio' ? <FullscreenAudioPreview uri={item.uri} /> : <Image source={{ uri: item.uri }} style={styles.fullImage} contentFit="contain" />}
-              </View>
-            </View>
-          </Modal>
-        </Animated.View>
+            </Modal>
+          </Animated.View>
+        </View>
+      </GestureDetector>
+      <View style={styles.actionBar}>
+        <TouchableOpacity style={[styles.actionButton, styles.deleteAction]} onPress={() => animateSwipe('left')} activeOpacity={0.8} accessibilityRole="button" accessibilityLabel="Move to trash">
+          <MaterialIcons name="close" size={30} color="#FFFFFF" />
+        </TouchableOpacity>
+        <TouchableOpacity style={[styles.actionButton, styles.undoAction]} onPress={() => onUndo?.()} activeOpacity={0.8} accessibilityRole="button" accessibilityLabel="Undo last action">
+          <MaterialIcons name="undo" size={25} color="#FFFFFF" />
+        </TouchableOpacity>
+        <TouchableOpacity style={[styles.actionButton, styles.keepAction]} onPress={() => animateSwipe('right')} activeOpacity={0.8} accessibilityRole="button" accessibilityLabel="Keep this item">
+          <MaterialIcons name="check" size={30} color="#FFFFFF" />
+        </TouchableOpacity>
       </View>
-    </GestureDetector>
+      {onReset ? <TouchableOpacity style={styles.resetAction} onPress={() => onReset()} activeOpacity={0.75} accessibilityRole="button" accessibilityLabel="Reset review">
+        <MaterialIcons name="refresh" size={18} color="#687076" /><Text style={styles.resetActionText}>Reset</Text>
+      </TouchableOpacity> : null}
+    </View>
   );
 });
 
 MediaReviewCard.displayName = 'MediaReviewCard';
 
 const styles = StyleSheet.create({
+  reviewContainer: { flex: 1, width: '100%', alignItems: 'center', justifyContent: 'center' },
   stackContainer: { ...StyleSheet.absoluteFillObject, justifyContent: 'center', alignItems: 'center' },
   cardWrapper: { ...StyleSheet.absoluteFillObject, justifyContent: 'center', alignItems: 'center' },
   backCard: { transform: [{ scale: 0.96 }, { translateY: 10 }], opacity: 0.9 },
@@ -173,6 +185,13 @@ const styles = StyleSheet.create({
   deleteBadge: { right: 45, borderColor: '#FF3B30', transform: [{ rotate: '15deg' }], backgroundColor: 'rgba(255, 59, 48, 0.9)' },
   keepText: { fontSize: 24, fontWeight: '800', color: '#FFFFFF', letterSpacing: 2 },
   deleteText: { fontSize: 24, fontWeight: '800', color: '#FFFFFF', letterSpacing: 2 },
+  actionBar: { position: 'absolute', bottom: 10, left: 0, right: 0, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 22, zIndex: 30, elevation: 30 },
+  actionButton: { width: 58, height: 58, borderRadius: 29, justifyContent: 'center', alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.18, shadowRadius: 4, elevation: 4 },
+  deleteAction: { backgroundColor: '#FF3B30' },
+  undoAction: { width: 48, height: 48, borderRadius: 24, backgroundColor: '#687076' },
+  keepAction: { backgroundColor: '#34C759' },
+  resetAction: { position: 'absolute', bottom: 76, alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 6, zIndex: 30 },
+  resetActionText: { color: '#687076', fontSize: 13, fontWeight: '600' },
   modalContainer: { flex: 1, backgroundColor: '#000000' },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingTop: 50, paddingBottom: 15, backgroundColor: 'rgba(0, 0, 0, 0.5)', zIndex: 10 },
   modalMeta: { flex: 1, marginRight: 15 },
