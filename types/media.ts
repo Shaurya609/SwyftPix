@@ -1,16 +1,47 @@
-export type MediaType = 'photo' | 'video' | 'pdf' | 'screenshot' | 'whatsapp';
+export type MediaType =
+  | 'photo'
+  | 'video'
+  | 'audio'
+  | 'pdf'
+  | 'document'
+  | 'archive'
+  | 'apk'
+  | 'screenshot'
+  | 'whatsapp'
+  | 'other';
 
-export interface MockMediaItem {
+export type MediaCategory =
+  | 'photo'
+  | 'video'
+  | 'audio'
+  | 'document'
+  | 'archive'
+  | 'apk'
+  | 'other';
+
+/**
+ * Normalized asset shape used by the SwyftPix review/trash pipeline.
+ * Providers can populate this shape regardless of where the file was discovered.
+ */
+export interface SwyftPixAsset {
   id: string;
   fileName: string;
   fileType: MediaType;
+  category: MediaCategory;
   fileSize: number; // in bytes
-  dateCreated: string; // ISO date format "YYYY-MM-DD"
-  source: 'Camera' | 'Screenshots' | 'WhatsApp' | 'Downloads' | 'Documents' | 'Videos';
+  dateCreated: string; // ISO date format
+  source: 'Camera' | 'Screenshots' | 'WhatsApp' | 'Downloads' | 'Documents' | 'Videos' | 'Music' | 'Archives' | 'APKs' | 'Other';
   uri: string;
-  duration?: string; // e.g. "0:15" for videos
+  mimeType?: string;
+  duration?: string; // e.g. "0:15" for videos/audio
   thumbnailColor?: string; // backup solid or gradient color representation
 }
+
+/**
+ * Backwards-compatible name used throughout the existing review/trash code.
+ * New media providers should produce SwyftPixAsset-shaped objects.
+ */
+export type MockMediaItem = SwyftPixAsset;
 
 export type SwipeAction = 'keep' | 'trash';
 
@@ -22,7 +53,7 @@ export interface ReviewedAssetRef {
 
 export interface TrashedAsset extends MockMediaItem {
   deletedAt: string; // ISO timestamp when swiped left / trashed
-  expiresAt: string | null; // Reserved for the future retention/auto-delete feature
+  expiresAt: string | null; // Global retention policy expiration
 }
 
 export interface StorageCategory {
