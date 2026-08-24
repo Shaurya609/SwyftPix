@@ -19,7 +19,7 @@ type NativeFileAccessModule = {
   hasAccess(): boolean;
   pickDirectory(): Promise<boolean>;
   pickFiles(): Promise<boolean>;
-  listFiles(category: FileAccessCategory, limit: number): UserFileAccessItem[];
+  listFiles(category: FileAccessCategory, limit: number): Promise<UserFileAccessItem[]>;
   deleteFile(uri: string): Promise<boolean>;
 };
 
@@ -48,11 +48,11 @@ export async function requestUserFileAccess(): Promise<boolean> {
   return (await getNativeFileAccess()?.pickFiles()) ?? false;
 }
 
-export function listUserFiles(category: FileAccessCategory, limit = 40): UserFileAccessItem[] {
+export async function listUserFiles(category: FileAccessCategory, limit = 40): Promise<UserFileAccessItem[]> {
   const nativeModule = getNativeFileAccess();
   if (!nativeModule) return [];
   try {
-    return nativeModule.listFiles(category, limit);
+    return await nativeModule.listFiles(category, limit);
   } catch (error) {
     console.warn('[FileAccess] User-authorized file discovery failed:', error);
     return [];
