@@ -18,13 +18,17 @@ import { canManageMedia, requestMediaManagementAccess } from '@/modules/swyftpix
 import { initialize, trashAsset, restoreAsset, keepAsset, undoKeep, getReviewedAssetIds, getTrashedAssets } from '@/utils/trash-service';
 
 interface SwipeHistory { item: MockMediaItem; direction: 'left' | 'right'; }
-type HomeCategory = 'photo' | 'video' | 'audio' | 'all';
+type HomeCategory = 'photo' | 'video' | 'audio' | 'document' | 'archive' | 'apk' | 'other' | 'all';
 
 const CATEGORIES: Array<{ id: HomeCategory; label: string; subtitle: string; icon: string }> = [
   { id: 'photo', label: 'Photos', subtitle: 'Images & screenshots', icon: 'photo-library' },
   { id: 'video', label: 'Videos', subtitle: 'Clips & recordings', icon: 'videocam' },
   { id: 'audio', label: 'Audio', subtitle: 'Music & recordings', icon: 'audiotrack' },
-  { id: 'all', label: 'All Media', subtitle: 'Photos, videos & audio', icon: 'collections' },
+  { id: 'document', label: 'Documents', subtitle: 'PDFs, Office & text files', icon: 'description' },
+  { id: 'archive', label: 'Archives', subtitle: 'ZIP, RAR & compressed files', icon: 'folder-zip' },
+  { id: 'apk', label: 'APKs', subtitle: 'Android installers', icon: 'android' },
+  { id: 'other', label: 'Other Files', subtitle: 'Other shared files', icon: 'insert-drive-file' },
+  { id: 'all', label: 'All Media', subtitle: 'Everything SwyftPix can review', icon: 'collections' },
 ];
 
 function matchesCategory(item: MockMediaItem, category: HomeCategory): boolean {
@@ -49,10 +53,7 @@ export default function HomeScreen() {
   const firstPageCache = useRef(new Map<HomeCategory, Awaited<ReturnType<typeof fetchDeviceMediaPage>>>());
 
   const refreshMediaManagementAccess = useCallback(() => {
-    if (Platform.OS !== 'android' || Platform.Version < 31) {
-      setHasMediaManagementAccess(true);
-      return true;
-    }
+    if (Platform.OS !== 'android' || Platform.Version < 31) { setHasMediaManagementAccess(true); return true; }
     const granted = canManageMedia();
     setHasMediaManagementAccess(granted);
     return granted;
@@ -79,24 +80,17 @@ export default function HomeScreen() {
       const reviewedIds = await getReviewedAssetIds();
       if (!hasPermission) {
         setItems(filterItems(MOCK_MEDIA_ITEMS, category, reviewedIds));
-        setEndCursor(undefined);
-        setHasNextPage(false);
-        return;
+        setEndCursor(undefined); setHasNextPage(false); return;
       }
-
       const cached = firstPageCache.current.get(category);
       const result = cached ?? await fetchDeviceMediaPage(40, undefined, category);
       if (!cached) firstPageCache.current.set(category, result);
-
       setItems(filterItems(result.items, category, reviewedIds));
-      setEndCursor(result.endCursor);
-      setHasNextPage(result.hasNextPage);
+      setEndCursor(result.endCursor); setHasNextPage(result.hasNextPage);
     } catch (err) {
       console.error('[HomeScreen] Error loading category:', err);
       setItems([]);
-    } finally {
-      setIsLoadingDeviceMedia(false);
-    }
+    } finally { setIsLoadingDeviceMedia(false); }
   }, [filterItems, hasPermission]);
 
   useEffect(() => {
@@ -106,17 +100,12 @@ export default function HomeScreen() {
         setDeletedItems(await getTrashedAssets());
         const granted = await checkAndRequestPermissions();
         setHasPermission(granted);
-        if (!granted) {
-          setHasMediaManagementAccess(true);
-        } else {
-          refreshMediaManagementAccess();
-        }
+        if (!granted) setHasMediaManagementAccess(true); else refreshMediaManagementAccess();
       } catch (err) {
         console.error('[HomeScreen] Error initializing persistent review state:', err);
         const granted = await checkAndRequestPermissions();
         setHasPermission(granted);
-        if (granted) refreshMediaManagementAccess();
-        else setHasMediaManagementAccess(true);
+        if (granted) refreshMediaManagementAccess(); else setHasMediaManagementAccess(true);
       }
     }
     init();
@@ -143,20 +132,11 @@ export default function HomeScreen() {
   }, [hasPermission, refreshMediaManagementAccess, selectedCategory, loadFirstPage]));
 
   const handleSelectCategory = useCallback(async (category: HomeCategory) => {
-    setSelectedCategory(category);
-    setHistory([]);
-    setKeptItems([]);
-    setItems([]);
-    await loadFirstPage(category);
+    setSelectedCategory(category); setHistory([]); setKeptItems([]); setItems([]); await loadFirstPage(category);
   }, [loadFirstPage]);
 
   const handleChangeCategory = useCallback(() => {
-    setSelectedCategory(null);
-    setItems([]);
-    setHistory([]);
-    setKeptItems([]);
-    setEndCursor(undefined);
-    setHasNextPage(false);
+    setSelectedCategory(null); setItems([]); setHistory([]); setKeptItems([]); setEndCursor(undefined); setHasNextPage(false);
   }, []);
 
   useEffect(() => {
@@ -171,11 +151,9 @@ export default function HomeScreen() {
           const existingIds = new Set(prev.map(i => i.id));
           return [...prev, ...result.items.filter(item => !existingIds.has(item.id) && !reviewedIds.has(item.id))];
         });
-        setEndCursor(result.endCursor);
-        setHasNextPage(result.hasNextPage);
-      } catch (err) {
-        console.error('[HomeScreen] Error loading more device media:', err);
-      } finally { setIsLoadingDeviceMedia(false); }
+        setEndCursor(result.endCursor); setHasNextPage(result.hasNextPage);
+      } catch (err) { console.error('[HomeScreen] Error loading more device media:', err); }
+      finally { setIsLoadingDeviceMedia(false); }
     }
     loadMore();
   }, [items.length, hasPermission, hasNextPage, isLoadingDeviceMedia, endCursor, selectedCategory]);
@@ -188,20 +166,16 @@ export default function HomeScreen() {
   const handleSwipeLeft = async (item: MockMediaItem) => {
     if (items.length === 0 || items[0].id !== item.id) return;
     try {
-      await trashAsset(item);
-      setHistory(h => h.some(e => e.item.id === item.id) ? h : [...h, { item, direction: 'left' }]);
-      setDeletedItems(d => d.some(i => i.id === item.id) ? d : [...d, item]);
-      setItems(prev => prev.length && prev[0].id === item.id ? prev.slice(1) : prev);
+      await trashAsset(item); setHistory(h => h.some(e => e.item.id === item.id) ? h : [...h, { item, direction: 'left' }]);
+      setDeletedItems(d => d.some(i => i.id === item.id) ? d : [...d, item]); setItems(prev => prev.length && prev[0].id === item.id ? prev.slice(1) : prev);
     } catch (err) { console.error('[HomeScreen] Error persisting trash action:', err); }
   };
 
   const handleSwipeRight = async (item: MockMediaItem) => {
     if (items.length === 0 || items[0].id !== item.id) return;
     try {
-      await keepAsset(item.id);
-      setHistory(h => h.some(e => e.item.id === item.id) ? h : [...h, { item, direction: 'right' }]);
-      setKeptItems(k => k.some(i => i.id === item.id) ? k : [...k, item]);
-      setItems(prev => prev.length && prev[0].id === item.id ? prev.slice(1) : prev);
+      await keepAsset(item.id); setHistory(h => h.some(e => e.item.id === item.id) ? h : [...h, { item, direction: 'right' }]);
+      setKeptItems(k => k.some(i => i.id === item.id) ? k : [...k, item]); setItems(prev => prev.length && prev[0].id === item.id ? prev.slice(1) : prev);
     } catch (err) { console.error('[HomeScreen] Error persisting keep action:', err); }
   };
 
@@ -209,24 +183,18 @@ export default function HomeScreen() {
     if (!history.length) return;
     const lastSwipe = history[history.length - 1];
     try {
-      if (lastSwipe.direction === 'left') await restoreAsset(lastSwipe.item.id);
-      else await undoKeep(lastSwipe.item.id);
-      setHistory(h => h.slice(0, -1));
-      setDeletedItems(d => d.filter(i => i.id !== lastSwipe.item.id));
-      setKeptItems(k => k.filter(i => i.id !== lastSwipe.item.id));
+      if (lastSwipe.direction === 'left') await restoreAsset(lastSwipe.item.id); else await undoKeep(lastSwipe.item.id);
+      setHistory(h => h.slice(0, -1)); setDeletedItems(d => d.filter(i => i.id !== lastSwipe.item.id)); setKeptItems(k => k.filter(i => i.id !== lastSwipe.item.id));
       setItems(prev => prev.some(i => i.id === lastSwipe.item.id) ? prev : [lastSwipe.item, ...prev]);
     } catch (err) { console.error('[HomeScreen] Error persisting undo action:', err); }
   };
 
-  const handleReset = async () => {
-    setHistory([]); setKeptItems([]);
-    if (selectedCategory) await loadFirstPage(selectedCategory);
-  };
+  const handleReset = async () => { setHistory([]); setKeptItems([]); if (selectedCategory) await loadFirstPage(selectedCategory); };
 
   const categorySelection = (
     <View style={styles.categoryContainer}>
       <ThemedText style={styles.categoryHeading} type="title">What do you want to clean?</ThemedText>
-      <ThemedText style={styles.categorySubheading} lightColor="#687076" darkColor="#9BA1A6">Choose a media type to start swiping.</ThemedText>
+      <ThemedText style={styles.categorySubheading} lightColor="#687076" darkColor="#9BA1A6">Choose a file type to start swiping.</ThemedText>
       <View style={styles.categoryGrid}>
         {CATEGORIES.map(category => (
           <TouchableOpacity key={category.id} style={[styles.categoryCard, isDark ? styles.categoryCardDark : styles.categoryCardLight]} onPress={() => handleSelectCategory(category.id)} activeOpacity={0.85}>
@@ -241,7 +209,7 @@ export default function HomeScreen() {
 
   return (
     <GestureHandlerRootView style={styles.container}>
-      <ThemedView style={[styles.screen, { paddingTop: insets.top, paddingBottom: insets.bottom || 16 }]}> 
+      <ThemedView style={[styles.screen, { paddingTop: insets.top, paddingBottom: insets.bottom || 16 }]}>
         <View style={styles.header}>
           <View style={styles.headerLeft}><MaterialIcons name="auto-awesome" size={24} color="#0a7ea4" /><ThemedText style={styles.headerTitle} type="title">SwyftPix</ThemedText></View>
           <ThemedText style={styles.headerSubtitle} lightColor="#687076" darkColor="#9BA1A6">Clean up your storage</ThemedText>
@@ -258,17 +226,29 @@ export default function HomeScreen() {
             </View>
             <View style={styles.cardContainer}>
               {hasPermission && hasMediaManagementAccess === false ? (
-                <View style={styles.emptyContainer}><View style={[styles.emptyCard, isDark ? styles.emptyCardDark : styles.emptyCardLight]}><View style={styles.emptyIconContainer}><MaterialIcons name="security" size={44} color="#0a7ea4" /></View><ThemedText style={styles.emptyTitle}>Finish Setup</ThemedText><ThemedText style={styles.emptyDescription} lightColor="#687076" darkColor="#9BA1A6">Give SwyftPix one-time Android media-management access. This prevents Android from showing another permission prompt every time you permanently delete an item.</ThemedText><TouchableOpacity style={styles.resetButton} onPress={requestMediaManagementSetup} activeOpacity={0.8}><ThemedText style={styles.resetButtonText}>Open Android Settings</ThemedText></TouchableOpacity></View></View>
-              ) : isLoadingDeviceMedia && items.length === 0 ? <ActivityIndicator size="large" color="#0a7ea4" /> : items.length > 0 ? (
-                items.slice(0, 2).reverse().map((item, index) => {
-                  const isTop = index === items.slice(0, 2).length - 1;
-                  return <MediaReviewCard key={item.id} item={item} isTop={isTop} onSwipeLeft={() => handleSwipeLeft(item)} onSwipeRight={() => handleSwipeRight(item)} ref={isTop ? cardRef : null} />;
-                })
+                <View style={styles.emptyContainer}>
+                  <View style={[styles.emptyCard, isDark ? styles.emptyCardDark : styles.emptyCardLight]}>
+                    <View style={styles.emptyIconContainer}><MaterialIcons name="security" size={44} color="#0a7ea4" /></View>
+                    <ThemedText style={styles.emptyTitle}>Finish Setup</ThemedText>
+                    <ThemedText style={styles.emptyDescription} lightColor="#687076" darkColor="#9BA1A6">Give SwyftPix one-time media-management access. This prevents Android from showing another permission prompt every time you permanently delete an item.</ThemedText>
+                    <TouchableOpacity style={styles.resetButton} onPress={requestMediaManagementSetup} activeOpacity={0.8}><ThemedText style={styles.resetButtonText}>Open Android Settings</ThemedText></TouchableOpacity>
+                  </View>
+                </View>
+              ) : isLoadingDeviceMedia && items.length === 0 ? (
+                <ActivityIndicator size="large" color="#0a7ea4" />
+              ) : items.length > 0 ? (
+                <MediaReviewCard ref={cardRef} items={items.slice(0, 2)} onSwipeLeft={handleSwipeLeft} onSwipeRight={handleSwipeRight} onUndo={handleUndo} onReset={handleReset} isDark={isDark} />
               ) : (
-                <View style={styles.emptyContainer}><View style={[styles.emptyCard, isDark ? styles.emptyCardDark : styles.emptyCardLight]}><View style={styles.emptyIconContainer}><MaterialIcons name="celebration" size={44} color="#34C759" /></View><ThemedText style={styles.emptyTitle}>All Caught Up!</ThemedText><ThemedText style={styles.emptyDescription} lightColor="#687076" darkColor="#9BA1A6">You've finished reviewing this category.</ThemedText><View style={styles.statsContainer}><View style={styles.statRow}><ThemedText style={styles.statLabel} lightColor="#687076" darkColor="#9BA1A6">Space Cleaned</ThemedText><ThemedText style={styles.statValue} lightColor="#34C759" darkColor="#30D158">{formatFileSize(spaceSaved)}</ThemedText></View><View style={styles.statRow}><ThemedText style={styles.statLabel} lightColor="#687076" darkColor="#9BA1A6">Files Deleted</ThemedText><ThemedText style={styles.statValue}>{deletedItems.length}</ThemedText></View><View style={styles.statRow}><ThemedText style={styles.statLabel} lightColor="#687076" darkColor="#9BA1A6">Files Kept</ThemedText><ThemedText style={styles.statValue}>{keptItems.length}</ThemedText></View></View><TouchableOpacity style={styles.resetButton} onPress={handleReset} activeOpacity={0.8}><MaterialIcons name="replay" size={20} color="#FFF" /><Text style={styles.resetButtonText}>Reset Category</Text></TouchableOpacity></View></View>
+                <View style={styles.emptyContainer}>
+                  <View style={[styles.emptyCard, isDark ? styles.emptyCardDark : styles.emptyCardLight]}>
+                    <View style={styles.emptyIconContainer}><MaterialIcons name="check-circle" size={44} color="#0a7ea4" /></View>
+                    <ThemedText style={styles.emptyTitle}>You're all caught up</ThemedText>
+                    <ThemedText style={styles.emptyDescription} lightColor="#687076" darkColor="#9BA1A6">No more {CATEGORIES.find(c => c.id === selectedCategory)?.label.toLowerCase()} need review.</ThemedText>
+                    <TouchableOpacity style={styles.resetButton} onPress={handleChangeCategory} activeOpacity={0.8}><ThemedText style={styles.resetButtonText}>Choose Another Category</ThemedText></TouchableOpacity>
+                  </View>
+                </View>
               )}
             </View>
-            {items.length > 0 && <View style={styles.buttonsContainer}><TouchableOpacity onPress={handleUndo} disabled={!history.length} style={[styles.roundButton, isDark && styles.roundButtonDark, styles.undoButton, !history.length && styles.disabledButton]} activeOpacity={0.7}><MaterialIcons name="undo" size={22} color={!history.length ? (isDark ? '#48484A' : '#AEAEB2') : '#FF9500'} /></TouchableOpacity><TouchableOpacity onPress={() => cardRef.current?.swipeLeft()} style={[styles.roundButton, isDark && styles.roundButtonDark, styles.deleteButton]} activeOpacity={0.7}><MaterialIcons name="close" size={32} color="#FF3B30" /></TouchableOpacity><TouchableOpacity onPress={() => cardRef.current?.swipeRight()} style={[styles.roundButton, isDark && styles.roundButtonDark, styles.keepButton]} activeOpacity={0.7}><MaterialIcons name="check" size={32} color="#34C759" /></TouchableOpacity><TouchableOpacity onPress={handleChangeCategory} style={[styles.roundButton, isDark && styles.roundButtonDark, styles.categoryButton]} activeOpacity={0.7}><MaterialIcons name="category" size={22} color="#0a7ea4" /></TouchableOpacity></View>}
           </>
         )}
       </ThemedView>
@@ -277,18 +257,35 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1 }, screen: { flex: 1 },
-  header: { paddingHorizontal: 20, paddingTop: 12, paddingBottom: 4, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 8 }, headerTitle: { fontSize: 26, fontWeight: '800', letterSpacing: 0.2 }, headerSubtitle: { fontSize: 13, fontWeight: '500', marginTop: 4 },
-  categoryContainer: { flex: 1, paddingHorizontal: 20, paddingTop: 18 }, categoryHeading: { fontSize: 28, fontWeight: '800', marginBottom: 6 }, categorySubheading: { fontSize: 14, marginBottom: 20 },
-  categoryGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 14 }, categoryCard: { width: '48%', borderRadius: 22, padding: 18, borderWidth: 1, borderColor: 'rgba(128,128,128,0.15)' }, categoryCardLight: { backgroundColor: '#FFFFFF' }, categoryCardDark: { backgroundColor: '#1C1C1E' }, categoryIcon: { width: 64, height: 64, borderRadius: 20, backgroundColor: 'rgba(10,126,164,0.1)', justifyContent: 'center', alignItems: 'center', marginBottom: 14 }, categoryLabel: { fontSize: 16, marginBottom: 4 }, categorySubtitle: { fontSize: 12, lineHeight: 17 },
-  modeHeader: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingTop: 12, paddingBottom: 2 }, modeBackButton: { width: 42, height: 42, borderRadius: 21, justifyContent: 'center', alignItems: 'center' }, modeTitleContainer: { marginLeft: 4 }, modeTitle: { fontSize: 17 }, modeSubtitle: { fontSize: 12, marginTop: 2 },
-  cardContainer: { flex: 1, marginHorizontal: 16, marginVertical: 12, position: 'relative', justifyContent: 'center', alignItems: 'center' },
-  buttonsContainer: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 14, paddingBottom: 12, paddingHorizontal: 16 },
-  roundButton: { width: 56, height: 56, borderRadius: 28, justifyContent: 'center', alignItems: 'center', backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: 'rgba(128,128,128,0.15)', shadowColor: '#000000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 5, elevation: 3 },
-  roundButtonDark: { backgroundColor: '#1C1C1E', borderColor: '#2C2C2E' }, undoButton: { width: 48, height: 48, borderRadius: 24 }, deleteButton: { width: 64, height: 64, borderRadius: 32, borderColor: 'rgba(255,59,48,0.2)' }, keepButton: { width: 64, height: 64, borderRadius: 32, borderColor: 'rgba(52,199,89,0.2)' }, categoryButton: { width: 48, height: 48, borderRadius: 24 }, disabledButton: { opacity: 0.4 },
-  emptyContainer: { flex: 1, width: '100%', justifyContent: 'center', alignItems: 'center', padding: 8 }, emptyCard: { width: '100%', borderRadius: 24, padding: 24, alignItems: 'center', borderWidth: 1, borderColor: 'rgba(128,128,128,0.15)', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.1, shadowRadius: 10, elevation: 4 }, emptyCardLight: { backgroundColor: '#FFFFFF', shadowColor: '#000000' }, emptyCardDark: { backgroundColor: '#1C1C1E', shadowColor: '#000000' },
-  emptyIconContainer: { width: 72, height: 72, borderRadius: 36, backgroundColor: 'rgba(52,199,89,0.15)', justifyContent: 'center', alignItems: 'center', marginBottom: 16 }, emptyTitle: { fontSize: 20, fontWeight: '700', textAlign: 'center', marginBottom: 8 }, emptyDescription: { fontSize: 13, textAlign: 'center', lineHeight: 18, marginBottom: 20 },
-  statsContainer: { width: '100%', gap: 12, marginBottom: 20 }, statRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: 'rgba(128,128,128,0.1)' }, statLabel: { fontSize: 13, fontWeight: '500' }, statValue: { fontSize: 14, fontWeight: '600' },
-  resetButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 20, paddingVertical: 12, borderRadius: 12, backgroundColor: '#0a7ea4', gap: 8, shadowColor: '#0a7ea4', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 5, elevation: 3 }, resetButtonText: { color: '#FFFFFF', fontSize: 15, fontWeight: '600' },
+  container: { flex: 1 },
+  screen: { flex: 1, paddingHorizontal: 16 },
+  header: { paddingTop: 8, paddingBottom: 10 },
+  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  headerTitle: { fontSize: 28 },
+  headerSubtitle: { fontSize: 13, marginTop: 2 },
+  categoryContainer: { flex: 1, justifyContent: 'center' },
+  categoryHeading: { fontSize: 25, textAlign: 'center', marginBottom: 6 },
+  categorySubheading: { fontSize: 14, textAlign: 'center', marginBottom: 20 },
+  categoryGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', gap: 12 },
+  categoryCard: { width: '48%', minHeight: 128, borderRadius: 18, padding: 14, justifyContent: 'center', alignItems: 'center', borderWidth: 1 },
+  categoryCardLight: { backgroundColor: '#fff', borderColor: '#e5e7eb' },
+  categoryCardDark: { backgroundColor: '#151718', borderColor: '#2b2f31' },
+  categoryIcon: { width: 58, height: 58, borderRadius: 18, alignItems: 'center', justifyContent: 'center', marginBottom: 8, backgroundColor: 'rgba(10,126,164,0.10)' },
+  categoryLabel: { fontSize: 16 },
+  categorySubtitle: { fontSize: 11, textAlign: 'center', marginTop: 3 },
+  modeHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
+  modeBackButton: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(10,126,164,0.10)', marginRight: 10 },
+  modeTitleContainer: { flex: 1 },
+  modeTitle: { fontSize: 19 },
+  modeSubtitle: { fontSize: 12, marginTop: 2 },
+  cardContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  emptyContainer: { width: '100%', alignItems: 'center' },
+  emptyCard: { width: '100%', maxWidth: 420, borderRadius: 20, padding: 24, alignItems: 'center', borderWidth: 1 },
+  emptyCardLight: { backgroundColor: '#fff', borderColor: '#e5e7eb' },
+  emptyCardDark: { backgroundColor: '#151718', borderColor: '#2b2f31' },
+  emptyIconContainer: { width: 72, height: 72, borderRadius: 36, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(10,126,164,0.10)', marginBottom: 14 },
+  emptyTitle: { fontSize: 20, marginBottom: 6 },
+  emptyDescription: { fontSize: 13, textAlign: 'center', lineHeight: 19, marginBottom: 18 },
+  resetButton: { paddingHorizontal: 18, paddingVertical: 11, borderRadius: 12, backgroundColor: '#0a7ea4' },
+  resetButtonText: { color: '#fff', fontSize: 13, fontWeight: '600' },
 });
