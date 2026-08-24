@@ -13,6 +13,7 @@ import { ThemedView } from '@/components/themed-view';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { MockMediaItem } from '@/types/media';
 import { checkAndRequestPermissions, fetchDeviceMediaPage } from '@/utils/device-media';
+import { hasUserFileAccess, requestUserDirectoryAccess, requestUserFileAccess } from '@/utils/file-access';
 import { canManageMedia, requestMediaManagementAccess } from '@/modules/swyftpix-media-delete';
 import { initialize, trashAsset, restoreAsset, keepAsset, undoKeep, getReviewedAssetIds, getTrashedAssets } from '@/utils/trash-service';
 
@@ -35,6 +36,10 @@ function matchesCategory(item: MockMediaItem, category: HomeCategory): boolean {
   return item.category === category || item.fileType === category;
 }
 
+function isFileCategory(category: HomeCategory | null): boolean {
+  return category === 'document' || category === 'archive' || category === 'apk' || category === 'other';
+}
+
 export default function HomeScreen() {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
@@ -45,6 +50,7 @@ export default function HomeScreen() {
   const [keptItems, setKeptItems] = useState<MockMediaItem[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<HomeCategory | null>(null);
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
+  const [hasFileAccess, setHasFileAccess] = useState(false);
   const [hasMediaManagementAccess, setHasMediaManagementAccess] = useState<boolean | null>(null);
   const [endCursor, setEndCursor] = useState<string | undefined>(undefined);
   const [hasNextPage, setHasNextPage] = useState(false);
@@ -58,6 +64,12 @@ export default function HomeScreen() {
     return granted;
   }, []);
 
+  const refreshFileAccess = useCallback(() => {
+    const granted = hasUserFileAccess();
+    setHasFileAccess(granted);
+    return granted;
+  }, []);
+
   const requestMediaManagementSetup = useCallback(() => {
     if (Platform.OS !== 'android' || Platform.Version < 31) return true;
     if (canManageMedia()) { setHasMediaManagementAccess(true); return true; }
@@ -68,6 +80,22 @@ export default function HomeScreen() {
     return false;
   }, []);
 
+  const requestFileAccessSetup = useCallback(() => {
+    if (Platform.OS !== 'android') {
+      Alert.alert('File access unavailable', 'File cleanup for this platform will be enabled when its native file-access provider is implemented. Your existing media remains available.');
+      return;
+    }
+    Alert.alert(
+      'Choose files for SwyftPix',
+      'Android protects documents, archives, APKs and other shared files separately from photos and videos. Choose folders you want SwyftPix to review, or select individual files. SwyftPix will only access what you explicitly choose.',
+      [
+        { text: 'Not now', style: 'cancel' },
+        { text: 'Choose files', onPress: async () => { const granted = await requestUserFileAccess(); if (granted) { setHasFileAccess(true); firstPageCache.current.clear(); if (selectedCategory) await loadFirstPage(selectedCategory); } } },
+        { text: 'Choose folder', onPress: async () => { const granted = await requestUserDirectoryAccess(); if (granted) { setHasFileAccess(true); firstPageCache.current.clear(); if (selectedCategory) await loadFirstPage(selectedCategory); } } },
+      ],
+    );
+  }, [selectedCategory]);
+
   const filterItems = useCallback((source: MockMediaItem[], category: HomeCategory | null, reviewedIds: Set<string>) => {
     if (!category) return [];
     return source.filter(item => matchesCategory(item, category) && !reviewedIds.has(item.id));
@@ -77,7 +105,12 @@ export default function HomeScreen() {
     setIsLoadingDeviceMedia(true);
     try {
       const reviewedIds = await getReviewedAssetIds();
-      if (!hasPermission) {
+      if (isFileCategory(category) && !hasFileAccess) {
+        setItems([]);
+        setEndCursor(undefined); setHasNextPage(false);
+        return;
+      }
+      if (!hasPermission && !isFileCategory(category)) {
         setItems(filterItems(MOCK_MEDIA_ITEMS, category, reviewedIds));
         setEndCursor(undefined); setHasNextPage(false); return;
       }
@@ -90,18 +123,20 @@ export default function HomeScreen() {
       console.error('[HomeScreen] Error loading category:', err);
       setItems([]);
     } finally { setIsLoadingDeviceMedia(false); }
-  }, [filterItems, hasPermission]);
+  }, [filterItems, hasPermission, hasFileAccess]);
 
   useEffect(() => {
     async function init() {
       try {
         await initialize();
         setDeletedItems(await getTrashedAssets());
+        setHasFileAccess(hasUserFileAccess());
         const granted = await checkAndRequestPermissions();
         setHasPermission(granted);
         if (!granted) setHasMediaManagementAccess(true); else refreshMediaManagementAccess();
       } catch (err) {
         console.error('[HomeScreen] Error initializing persistent review state:', err);
+        setHasFileAccess(hasUserFileAccess());
         const granted = await checkAndRequestPermissions();
         setHasPermission(granted);
         if (granted) refreshMediaManagementAccess(); else setHasMediaManagementAccess(true);
@@ -115,6 +150,7 @@ export default function HomeScreen() {
     let cancelled = false;
     async function refreshAfterFocus() {
       try {
+        refreshFileAccess();
         const managementGranted = refreshMediaManagementAccess();
         if (!managementGranted && hasPermission) { setItems([]); return; }
         await initialize();
@@ -128,7 +164,7 @@ export default function HomeScreen() {
     }
     refreshAfterFocus();
     return () => { cancelled = true; };
-  }, [hasPermission, refreshMediaManagementAccess, selectedCategory, loadFirstPage]));
+  }, [hasPermission, refreshMediaManagementAccess, refreshFileAccess, selectedCategory, loadFirstPage]));
 
   const handleSelectCategory = useCallback(async (category: HomeCategory) => {
     setSelectedCategory(category); setHistory([]); setKeptItems([]); setItems([]); await loadFirstPage(category);
@@ -213,9 +249,31 @@ export default function HomeScreen() {
     </View>
   );
 
+  const fileAccessCard = (
+    <View style={styles.emptyContainer}>
+      <View style={[styles.emptyCard, isDark ? styles.emptyCardDark : styles.emptyCardLight]}>
+        <View style={styles.emptyIconContainer}><MaterialIcons name="folder-open" size={44} color="#0a7ea4" /></View>
+        <ThemedText style={styles.emptyTitle}>Choose files to review</ThemedText>
+        <ThemedText style={styles.emptyDescription} lightColor="#687076" darkColor="#9BA1A6">Android keeps documents, archives, APKs and other shared files behind user-selected file access. SwyftPix will only scan folders or files you explicitly choose.</ThemedText>
+        <TouchableOpacity style={styles.resetButton} onPress={requestFileAccessSetup} activeOpacity={0.8}><ThemedText style={styles.resetButtonText}>Choose Files or Folders</ThemedText></TouchableOpacity>
+      </View>
+    </View>
+  );
+
+  const fileAccessUnavailableCard = (
+    <View style={styles.emptyContainer}>
+      <View style={[styles.emptyCard, isDark ? styles.emptyCardDark : styles.emptyCardLight]}>
+        <View style={styles.emptyIconContainer}><MaterialIcons name="info-outline" size={44} color="#0a7ea4" /></View>
+        <ThemedText style={styles.emptyTitle}>File cleanup unavailable</ThemedText>
+        <ThemedText style={styles.emptyDescription} lightColor="#687076" darkColor="#9BA1A6">This platform's document and file provider has not been enabled yet. Your supported media categories remain available.</ThemedText>
+        <TouchableOpacity style={styles.resetButton} onPress={handleChangeCategory} activeOpacity={0.8}><ThemedText style={styles.resetButtonText}>Choose Another Category</ThemedText></TouchableOpacity>
+      </View>
+    </View>
+  );
+
   return (
     <GestureHandlerRootView style={styles.container}>
-      <ThemedView style={[styles.screen, { paddingTop: insets.top, paddingBottom: insets.bottom || 16 }]}>
+      <ThemedView style={[styles.screen, { paddingTop: insets.top, paddingBottom: insets.bottom || 16 }]}> 
         <View style={styles.header}>
           <View style={styles.headerLeft}><MaterialIcons name="auto-awesome" size={24} color="#0a7ea4" /><ThemedText style={styles.headerTitle} type="title">SwyftPix</ThemedText></View>
           <ThemedText style={styles.headerSubtitle} lightColor="#687076" darkColor="#9BA1A6">Clean up your storage</ThemedText>
@@ -231,12 +289,14 @@ export default function HomeScreen() {
               </View>
             </View>
             <View style={styles.cardContainer}>
-              {hasPermission && hasMediaManagementAccess === false ? (
+              {isFileCategory(selectedCategory) && Platform.OS !== 'android' ? fileAccessUnavailableCard
+              : isFileCategory(selectedCategory) && !hasFileAccess ? fileAccessCard
+              : hasPermission && hasMediaManagementAccess === false ? (
                 <View style={styles.emptyContainer}>
                   <View style={[styles.emptyCard, isDark ? styles.emptyCardDark : styles.emptyCardLight]}>
                     <View style={styles.emptyIconContainer}><MaterialIcons name="security" size={44} color="#0a7ea4" /></View>
                     <ThemedText style={styles.emptyTitle}>Finish Setup</ThemedText>
-                    <ThemedText style={styles.emptyDescription} lightColor="#687076" darkColor="#9BA1A6">Give SwyftPix one-time media-management access. This prevents Android from showing another permission prompt every time you permanently delete an item.</ThemedText>
+                    <ThemedText style={styles.emptyDescription} lightColor="#687076" darkColor="#9BA1A6">Give SwyftPix one-time Android media-management access. This prevents Android from showing another permission prompt every time you permanently delete an item.</ThemedText>
                     <TouchableOpacity style={styles.resetButton} onPress={requestMediaManagementSetup} activeOpacity={0.8}><ThemedText style={styles.resetButtonText}>Open Android Settings</ThemedText></TouchableOpacity>
                   </View>
                 </View>
