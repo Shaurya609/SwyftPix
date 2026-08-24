@@ -17,7 +17,8 @@ export function MediaPreviewContainer({ item, isTop }: MediaPreviewContainerProp
   const isDark = colorScheme === 'dark';
 
   const isAudio = item.fileType === 'audio';
-  const isVisual = ['photo', 'screenshot', 'whatsapp'].includes(item.fileType);
+  const isVideo = item.fileType === 'video';
+  const isVisual = ['photo', 'screenshot', 'whatsapp', 'video'].includes(item.fileType);
   const isDocument = ['pdf', 'document'].includes(item.fileType);
 
   const getSourceBadgeColor = (source: string) => {
@@ -66,6 +67,18 @@ export function MediaPreviewContainer({ item, isTop }: MediaPreviewContainerProp
         {isVisual ? (
           <View style={styles.imageWrapper}>
             <Image source={{ uri: item.uri }} style={styles.image} contentFit="cover" transition={200} />
+            {isVideo && (
+              <View style={styles.videoOverlay}>
+                <View style={styles.playButton}>
+                  <MaterialIcons name="play-arrow" size={40} color="#FFFFFF" style={{ marginLeft: 4 }} />
+                </View>
+                {item.duration && (
+                  <View style={styles.durationBadge}>
+                    <Text style={styles.durationText}>{item.duration}</Text>
+                  </View>
+                )}
+              </View>
+            )}
           </View>
         ) : (
           <View style={[styles.genericPreview, { backgroundColor: isDark ? '#202124' : '#F2F2F7' }]}>
