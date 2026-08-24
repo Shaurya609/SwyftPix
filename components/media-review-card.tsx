@@ -23,9 +23,12 @@ const FullscreenAudioPreview = ({ uri }: { uri: string }) => {
   const player = useAudioPlayer(uri, { updateInterval: 250 });
   const status = useAudioPlayerStatus(player);
 
-  useEffect(() => () => {
-    player.pause();
-    player.remove();
+  useEffect(() => {
+    player.play();
+    return () => {
+      player.pause();
+      player.remove();
+    };
   }, [player]);
 
   const togglePlayback = () => {
