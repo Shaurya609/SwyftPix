@@ -3,7 +3,8 @@ import * as MediaLibrary from 'expo-media-library';
 import { MockMediaItem, TrashedAsset } from '@/types/media';
 import { deleteMediaByPath } from '@/modules/swyftpix-media-delete';
 
-export const RETENTION_OPTIONS = [7, 30, 60, 90, 0] as const;
+// Negative values are developer test intervals in seconds. 0 means never.
+export const RETENTION_OPTIONS = [-5, 7, 30, 60, 90, 0] as const;
 export type RetentionDays = (typeof RETENTION_OPTIONS)[number];
 export const DEFAULT_RETENTION_DAYS: RetentionDays = 30;
 
@@ -35,9 +36,12 @@ async function getDb(): Promise<SQLite.SQLiteDatabase> {
   return dbOpenPromise;
 }
 
-function calculateExpiresAt(deletedAt: string, retentionDays: RetentionDays): string | null {
-  if (retentionDays === 0) return null;
-  return new Date(new Date(deletedAt).getTime() + retentionDays * 24 * 60 * 60 * 1000).toISOString();
+function calculateExpiresAt(deletedAt: string, retention: RetentionDays): string | null {
+  if (retention === 0) return null;
+  const durationMs = retention < 0
+    ? Math.abs(retention) * 1000
+    : retention * 24 * 60 * 60 * 1000;
+  return new Date(new Date(deletedAt).getTime() + durationMs).toISOString();
 }
 
 async function readRetentionDays(db: SQLite.SQLiteDatabase): Promise<RetentionDays> {
@@ -79,11 +83,11 @@ export async function initialize(): Promise<void> {
         `);
       });
     }
-    const retentionDays = await readRetentionDays(db);
-    if (retentionDays !== 0) {
+    const retention = await readRetentionDays(db);
+    if (retention !== 0) {
       const rows = await db.getAllAsync<{ id: string; deleted_at: string }>(`SELECT id, deleted_at FROM trashed_media WHERE expires_at IS NULL;`);
       for (const row of rows) {
-        const expiresAt = calculateExpiresAt(row.deleted_at, retentionDays);
+        const expiresAt = calculateExpiresAt(row.deleted_at, retention);
         if (expiresAt) await db.runAsync(`UPDATE trashed_media SET expires_at = ? WHERE id = ?;`, [expiresAt, row.id]);
       }
     }
@@ -96,10 +100,18 @@ export async function getRetentionDays(): Promise<RetentionDays> {
   return readRetentionDays(await getDb());
 }
 
-export async function setRetentionDays(retentionDays: RetentionDays): Promise<void> {
-  if (!RETENTION_OPTIONS.includes(retentionDays)) throw new Error(`Unsupported trash retention period: ${retentionDays}`);
+export async function setRetentionDays(retention: RetentionDays): Promise<void> {
+  if (!RETENTION_OPTIONS.includes(retention)) throw new Error(`Unsupported trash retention period: ${retention}`);
   await initialize();
-  await (await getDb()).runAsync(`INSERT OR REPLACE INTO app_settings (key, value) VALUES ('trash_retention_days', ?);`, [String(retentionDays)]);
+  const db = await getDb();
+  await db.withTransactionAsync(async () => {
+    await db.runAsync(`INSERT OR REPLACE INTO app_settings (key, value) VALUES ('trash_retention_days', ?);`, [String(retention)]);
+    const rows = await db.getAllAsync<{ id: string; deleted_at: string }>(`SELECT id, deleted_at FROM trashed_media;`);
+    for (const row of rows) {
+      const expiresAt = calculateExpiresAt(row.deleted_at, retention);
+      await db.runAsync(`UPDATE trashed_media SET expires_at = ? WHERE id = ?;`, [expiresAt, row.id]);
+    }
+  });
 }
 
 export async function trashAsset(item: MockMediaItem): Promise<void> {
@@ -241,8 +253,6 @@ export async function permanentlyDeleteAsset(id: string): Promise<void> {
 
   const asset = await findAssetForTrashItem(item);
   if (!asset) {
-    // A Trash row can outlive its Android MediaStore asset. In that case there
-    // is nothing left to delete; remove only our stale local Trash metadata.
     await removeTrashRecord(id);
     console.warn(`[TrashService] Asset ${id} was already missing; removing stale Trash record.`);
     return;
