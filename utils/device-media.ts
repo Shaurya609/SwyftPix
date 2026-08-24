@@ -6,21 +6,22 @@ import { MockMediaItem, MediaType } from '../types/media';
 let albumCache: Map<string, string> | null = null;
 
 /**
- * Request and check permission status for accessing media library
+ * Request and check permission status for accessing media library.
+ * Audio is included so the device index can grow beyond photos/videos.
  */
 export async function checkAndRequestPermissions(): Promise<boolean> {
   try {
     const { status, canAskAgain } = await MediaLibrary.getPermissionsAsync(false, ['photo', 'video', 'audio']);
-    
+
     if (status === 'granted') {
       return true;
     }
-    
+
     if (canAskAgain) {
       const { status: requestStatus } = await MediaLibrary.requestPermissionsAsync(false, ['photo', 'video', 'audio']);
       return requestStatus === 'granted';
     }
-    
+
     return false;
   } catch (error) {
     console.error('[DeviceMedia] Error checking/requesting permissions:', error);
@@ -52,40 +53,42 @@ async function getAlbumMap(): Promise<Map<string, string>> {
 }
 
 /**
- * Classifies the origin/source folder of an asset based on album title and metadata
+ * Classifies the origin/source folder of an asset based on album title and metadata.
  */
 function determineSource(
   asset: MediaLibrary.Asset,
   albumTitle?: string
 ): MockMediaItem['source'] {
   const isVideo = asset.mediaType === 'video';
-  
-  // 1. Try to match by album title
+  const isAudio = asset.mediaType === 'audio';
+
   if (albumTitle) {
     const name = albumTitle.toLowerCase();
     if (name.includes('screenshot')) return 'Screenshots';
     if (name.includes('whatsapp')) return 'WhatsApp';
     if (name.includes('download')) return 'Downloads';
+    if (name.includes('music') || name.includes('audio') || name.includes('podcast')) return 'Music';
+    if (name.includes('archive')) return 'Archives';
+    if (name.includes('apk')) return 'APKs';
     if (name.includes('camera') || name.includes('dcim') || name.includes('camera roll') || name.includes('recents')) {
       return isVideo ? 'Videos' : 'Camera';
     }
     if (name.includes('video')) return 'Videos';
   }
 
-  // 2. Try to match by filename or URI path if album title is missing
   const filename = (asset.filename || '').toLowerCase();
   const uri = (asset.uri || '').toLowerCase();
 
   if (filename.includes('screenshot') || uri.includes('screenshot')) return 'Screenshots';
   if (filename.includes('whatsapp') || uri.includes('whatsapp')) return 'WhatsApp';
   if (filename.includes('download') || uri.includes('download')) return 'Downloads';
+  if (isAudio) return 'Music';
 
-  // 3. Fallback based on media type
   return isVideo ? 'Videos' : 'Camera';
 }
 
 /**
- * Formats video duration in seconds (number) to "MM:SS" or "H:MM:SS"
+ * Formats a media duration in seconds to "MM:SS" or "H:MM:SS".
  */
 function formatDuration(seconds: number): string {
   if (!seconds || isNaN(seconds) || seconds <= 0) return '0:00';
@@ -103,7 +106,6 @@ function formatDuration(seconds: number): string {
 
 /**
  * Fetches the file size without requesting full MediaLibrary asset metadata.
- *
  * Calling MediaLibrary.getAssetInfoAsync() on Android can trigger EXIF access,
  * which requires ACCESS_MEDIA_LOCATION. SwyftPix only needs the file size here,
  * so use the asset URI directly with the modern expo-file-system File API.
@@ -124,11 +126,12 @@ async function fetchAssetSize(assetId: string, fallbackUri?: string): Promise<nu
     // Some MediaStore URIs may not expose file metadata. Keep the asset usable.
   }
 
-  return 0; // Fallback indicator
+  return 0;
 }
 
 /**
- * Fetches a paginated batch of device photos and videos, and transforms them into MockMediaItem structure
+ * Fetches a paginated batch of device photos, videos, and audio, then transforms
+ * them into the normalized SwyftPixAsset-compatible structure.
  */
 export interface FetchPageResult {
   items: MockMediaItem[];
@@ -141,58 +144,72 @@ export async function fetchDeviceMediaPage(
   afterAssetId?: string
 ): Promise<FetchPageResult> {
   try {
-    // 1. Get album mapping cache
     const albumMap = await getAlbumMap();
 
-    // 2. Query media library (photos and videos, newest first)
     const pagedAssets = await MediaLibrary.getAssetsAsync({
       first: limit,
       after: afterAssetId,
-      mediaType: [MediaLibrary.MediaType.photo, MediaLibrary.MediaType.video],
-      sortBy: [MediaLibrary.SortBy.creationTime], // legacy SDK sorts newest first by default, or passing sortBy will force it
+      mediaType: [
+        MediaLibrary.MediaType.photo,
+        MediaLibrary.MediaType.video,
+        MediaLibrary.MediaType.audio,
+      ],
+      sortBy: [MediaLibrary.SortBy.creationTime],
     });
 
     const { assets, endCursor, hasNextPage } = pagedAssets;
 
-    // 3. For each asset, fetch size and map to MockMediaItem structure in parallel
     const mappedItems: MockMediaItem[] = await Promise.all(
       assets.map(async (asset) => {
-        // Fetch accurate file size
         const finalSize = await fetchAssetSize(asset.id, asset.uri);
+        const dateCreatedStr = asset.creationTime
+          ? new Date(asset.creationTime).toISOString()
+          : new Date().toISOString();
 
-        // Map creationTime to ISO string
-        let dateCreatedStr = new Date().toISOString();
-        if (asset.creationTime) {
-          dateCreatedStr = new Date(asset.creationTime).toISOString();
-        }
-
-        // Determine source classification
         const albumTitle = asset.albumId ? albumMap.get(asset.albumId) : undefined;
         const source = determineSource(asset, albumTitle);
+        const isVideo = asset.mediaType === 'video';
+        const isAudio = asset.mediaType === 'audio';
 
-        // Map file type
-        const fileType: MediaType = asset.mediaType === 'video' 
-          ? 'video' 
-          : (source === 'Screenshots' ? 'screenshot' : (source === 'WhatsApp' ? 'whatsapp' : 'photo'));
+        let fileType: MediaType;
+        let category: MockMediaItem['category'];
 
-        // Populate required MockMediaItem compatible fields
+        if (isVideo) {
+          fileType = 'video';
+          category = 'video';
+        } else if (isAudio) {
+          fileType = 'audio';
+          category = 'audio';
+        } else {
+          fileType = source === 'Screenshots'
+            ? 'screenshot'
+            : source === 'WhatsApp'
+              ? 'whatsapp'
+              : 'photo';
+          category = 'photo';
+        }
+
         const item: MockMediaItem = {
           id: asset.id,
           fileName: asset.filename || `MEDIA_${asset.id}`,
           fileType,
+          category,
           fileSize: finalSize,
           dateCreated: dateCreatedStr,
           source,
           uri: asset.uri,
+          mimeType: isVideo ? 'video/*' : isAudio ? 'audio/*' : 'image/*',
         };
 
-        // Add optional fields
-        if (asset.mediaType === 'video' && asset.duration !== undefined) {
+        if ((isVideo || isAudio) && asset.duration !== undefined) {
           item.duration = formatDuration(asset.duration);
         }
 
-        // Set backup solid color representation for the card stack
-        item.thumbnailColor = asset.mediaType === 'video' ? '#a1c4fd' : '#ff9a9e';
+        item.thumbnailColor = isVideo
+          ? '#a1c4fd'
+          : isAudio
+            ? '#b8a1ff'
+            : '#ff9a9e';
 
         return item;
       })
