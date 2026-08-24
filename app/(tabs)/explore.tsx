@@ -22,33 +22,8 @@ import {
 } from '@/utils/trash-service';
 import { TrashedAsset } from '@/types/media';
 
-function formatExpiry(expiresAt: string | null): string {
-  if (!expiresAt) return 'Never auto-deletes';
-  const remainingMs = new Date(expiresAt).getTime() - Date.now();
-  if (remainingMs <= 0) return 'Expires now';
-
-  const remainingSeconds = Math.ceil(remainingMs / 1000);
-  if (remainingSeconds < 60) {
-    return `Auto-deletes in ${remainingSeconds} sec`;
-  }
-
-  const remainingMinutes = Math.ceil(remainingSeconds / 60);
-  if (remainingMinutes < 60) {
-    return `Auto-deletes in ${remainingMinutes} min`;
-  }
-
-  const remainingHours = Math.ceil(remainingMinutes / 60);
-  if (remainingHours < 24) {
-    return `Auto-deletes in ${remainingHours} hr${remainingHours === 1 ? '' : 's'}`;
-  }
-
-  const remainingDays = Math.ceil(remainingMs / (24 * 60 * 60 * 1000));
-  return `Auto-deletes in ${remainingDays} day${remainingDays === 1 ? '' : 's'}`;
-}
-
 function retentionLabel(retention: RetentionDays): string {
   if (retention === 0) return 'Never';
-  if (retention < 0) return `${Math.abs(retention)} sec`;
   return `${retention} days`;
 }
 
@@ -219,7 +194,7 @@ export default function TrashScreen() {
     if (nextRetention === retentionDays) return;
     const description = nextRetention === 0
       ? 'All items currently in Trash will stop auto-deleting. New items will also be kept until you restore or permanently delete them.'
-      : `Items currently in Trash and new Trash items will automatically delete after ${retentionLabel(nextRetention)}. Existing expiration dates will be recalculated from when each item entered Trash.`;
+      : `All items in Trash will automatically delete after ${retentionLabel(nextRetention)}. This policy applies to items already in Trash and new items, using each item’s original Trash date.`;
 
     Alert.alert(
       'Change Trash retention?',
@@ -269,7 +244,7 @@ export default function TrashScreen() {
         </View>
         <ThemedText numberOfLines={1} style={styles.fileName}>{item.fileName}</ThemedText>
         <ThemedText lightColor="#687076" darkColor="#9BA1A6" style={styles.meta}>
-          {formatFileSize(item.fileSize)} · {formatExpiry(item.expiresAt)}
+          {formatFileSize(item.fileSize)}
         </ThemedText>
       </TouchableOpacity>
     );
@@ -341,7 +316,7 @@ export default function TrashScreen() {
           </ThemedText>
         </View>
         <ThemedText lightColor="#687076" darkColor="#9BA1A6" style={styles.retentionDescription}>
-          Applies to items already in Trash and new items. “5 sec” is a testing option.
+          Applies to all items in Trash. Changing this setting updates the policy for existing and new items.
         </ThemedText>
         <View style={styles.retentionOptions}>
           {RETENTION_OPTIONS.map(option => {
