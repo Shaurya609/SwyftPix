@@ -41,8 +41,11 @@ export default function TrashScreen() {
   const [items, setItems] = useState<TrashedAsset[]>([]);
   const [stats, setStats] = useState({ count: 0, totalSize: 0 });
   const [retentionDays, setRetentionDaysState] = useState<RetentionDays>(DEFAULT_RETENTION_DAYS);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
 
   const loadTrash = useCallback(async () => {
     try {
@@ -56,6 +59,10 @@ export default function TrashScreen() {
       setItems(trashedAssets);
       setStats(trashStats);
       setRetentionDaysState(currentRetention);
+      setSelectedIds(previous => {
+        const availableIds = new Set(trashedAssets.map(item => item.id));
+        return new Set([...previous].filter(id => availableIds.has(id)));
+      });
     } catch (error) {
       console.error('[TrashScreen] Error loading Trash:', error);
     } finally {
@@ -71,6 +78,109 @@ export default function TrashScreen() {
   const handleRefresh = () => {
     setIsRefreshing(true);
     loadTrash();
+  };
+
+  const exitSelectionMode = () => {
+    if (isProcessing) return;
+    setSelectedIds(new Set());
+    setIsSelectionMode(false);
+  };
+
+  const toggleSelection = (id: string) => {
+    if (isProcessing) return;
+    setSelectedIds(previous => {
+      const next = new Set(previous);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const selectAll = () => {
+    if (isProcessing) return;
+    if (selectedIds.size === items.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(items.map(item => item.id)));
+    }
+  };
+
+  const processSelected = async (action: 'restore' | 'delete') => {
+    const ids = [...selectedIds];
+    if (ids.length === 0 || isProcessing) return;
+
+    setIsProcessing(true);
+    try {
+      // Keep these sequential. Permanent deletion can require native Android
+      // authorization and the native module intentionally allows one request at a time.
+      for (const id of ids) {
+        if (action === 'restore') await restoreAsset(id);
+        else await permanentlyDeleteAsset(id);
+      }
+      setSelectedIds(new Set());
+      setIsSelectionMode(false);
+      await loadTrash();
+    } catch (error) {
+      console.error(`[TrashScreen] Error processing selected items (${action}):`, error);
+      Alert.alert(
+        action === 'restore' ? 'Restore failed' : 'Delete failed',
+        action === 'restore'
+          ? 'One or more selected items could not be restored.'
+          : 'One or more selected items could not be permanently deleted.'
+      );
+      await loadTrash();
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleRestoreSelected = () => {
+    const count = selectedIds.size;
+    if (!count) return;
+    Alert.alert(
+      count === 1 ? 'Restore item?' : `Restore ${count} items?`,
+      count === 1
+        ? 'The selected item will be returned to the review deck.'
+        : 'The selected items will be returned to the review deck.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Restore', onPress: () => processSelected('restore') },
+      ]
+    );
+  };
+
+  const handleDeleteSelected = () => {
+    const count = selectedIds.size;
+    if (!count) return;
+    Alert.alert(
+      count === 1 ? 'Delete permanently?' : `Delete ${count} items permanently?`,
+      count === 1
+        ? 'The selected item will be permanently deleted from your device. This cannot be undone.'
+        : 'The selected items will be permanently deleted from your device. This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Delete Permanently', style: 'destructive', onPress: () => processSelected('delete') },
+      ]
+    );
+  };
+
+  const handleEmptyTrash = () => {
+    if (items.length === 0 || isProcessing) return;
+    Alert.alert(
+      'Empty Trash?',
+      `This will permanently delete all ${items.length} item${items.length === 1 ? '' : 's'} from your device. This cannot be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Empty Trash',
+          style: 'destructive',
+          onPress: () => {
+            setSelectedIds(new Set(items.map(item => item.id)));
+            processSelected('delete');
+          },
+        },
+      ]
+    );
   };
 
   const handleRetentionChange = (nextRetention: RetentionDays) => {
@@ -99,91 +209,79 @@ export default function TrashScreen() {
     );
   };
 
-  const handleRestore = (item: TrashedAsset) => {
-    Alert.alert(
-      'Restore item?',
-      `${item.fileName} will be returned to the review deck.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Restore',
-          onPress: async () => {
-            try {
-              await restoreAsset(item.id);
-              await loadTrash();
-            } catch (error) {
-              console.error('[TrashScreen] Error restoring item:', error);
-              Alert.alert('Restore failed', 'The item could not be restored.');
-            }
-          },
-        },
-      ]
-    );
-  };
-
-  const handlePermanentDelete = (item: TrashedAsset) => {
-    Alert.alert(
-      'Delete permanently?',
-      `${item.fileName} will be permanently deleted from your device. This cannot be undone.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete Permanently',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await permanentlyDeleteAsset(item.id);
-              await loadTrash();
-            } catch (error) {
-              console.error('[TrashScreen] Error permanently deleting item:', error);
-              Alert.alert('Delete failed', 'The file could not be permanently deleted.');
-            }
-          },
-        },
-      ]
-    );
-  };
-
-  const renderItem = ({ item }: { item: TrashedAsset }) => (
-    <View style={[styles.row, isDark && styles.rowDark]}>
-      <Image source={{ uri: item.uri }} style={styles.thumbnail} contentFit="cover" />
-      <View style={styles.details}>
+  const renderItem = ({ item }: { item: TrashedAsset }) => {
+    const selected = selectedIds.has(item.id);
+    return (
+      <TouchableOpacity
+        onPress={() => isSelectionMode && toggleSelection(item.id)}
+        activeOpacity={isSelectionMode ? 0.8 : 1}
+        disabled={!isSelectionMode || isProcessing}
+        style={styles.gridItem}
+      >
+        <View style={[styles.thumbnailWrap, isDark && styles.thumbnailWrapDark, selected && styles.thumbnailWrapSelected]}>
+          <Image source={{ uri: item.uri }} style={styles.thumbnail} contentFit="cover" />
+          {item.fileType === 'video' && (
+            <View style={styles.videoBadge}>
+              <MaterialIcons name="play-arrow" size={14} color="#FFFFFF" />
+            </View>
+          )}
+          {isSelectionMode && (
+            <View style={[styles.selectionBadge, selected && styles.selectionBadgeSelected]}>
+              {selected && <MaterialIcons name="check" size={16} color="#FFFFFF" />}
+            </View>
+          )}
+        </View>
         <ThemedText numberOfLines={1} style={styles.fileName}>{item.fileName}</ThemedText>
         <ThemedText lightColor="#687076" darkColor="#9BA1A6" style={styles.meta}>
-          {item.fileType.toUpperCase()} · {formatFileSize(item.fileSize)}
+          {formatFileSize(item.fileSize)} · {formatExpiry(item.expiresAt)}
         </ThemedText>
-        <ThemedText lightColor="#687076" darkColor="#9BA1A6" style={styles.meta}>
-          Deleted {new Date(item.deletedAt).toLocaleDateString()}
-        </ThemedText>
-        <ThemedText lightColor="#0a7ea4" darkColor="#64D2FF" style={styles.expiry}>
-          {formatExpiry(item.expiresAt)}
-        </ThemedText>
-        <View style={styles.actions}>
-          <TouchableOpacity onPress={() => handleRestore(item)} style={styles.restoreButton} activeOpacity={0.8}>
-            <MaterialIcons name="restore" size={18} color="#0a7ea4" />
-            <ThemedText style={styles.restoreText}>Restore</ThemedText>
-          </TouchableOpacity>
-          <TouchableOpacity onPress={() => handlePermanentDelete(item)} style={styles.deleteButton} activeOpacity={0.8}>
-            <MaterialIcons name="delete-forever" size={18} color="#FF3B30" />
-            <ThemedText style={styles.deleteText}>Delete</ThemedText>
-          </TouchableOpacity>
-        </View>
-      </View>
-    </View>
-  );
+      </TouchableOpacity>
+    );
+  };
+
+  const selectedCount = selectedIds.size;
+  const allSelected = items.length > 0 && selectedCount === items.length;
 
   return (
     <ThemedView style={styles.screen}>
       <View style={styles.header}>
-        <View>
-          <ThemedText type="title" style={styles.title}>Trash</ThemedText>
-          <ThemedText lightColor="#687076" darkColor="#9BA1A6" style={styles.subtitle}>
-            Items you swipe left are kept here.
-          </ThemedText>
-        </View>
-        <View style={styles.countBadge}>
-          <ThemedText style={styles.countText}>{stats.count}</ThemedText>
-        </View>
+        {isSelectionMode ? (
+          <TouchableOpacity onPress={exitSelectionMode} disabled={isProcessing} style={styles.headerAction}>
+            <MaterialIcons name="close" size={22} color="#0a7ea4" />
+            <ThemedText style={styles.headerActionText}>Cancel</ThemedText>
+          </TouchableOpacity>
+        ) : (
+          <View style={styles.headerTitleWrap}>
+            <ThemedText type="title" style={styles.title}>Trash</ThemedText>
+            <ThemedText lightColor="#687076" darkColor="#9BA1A6" style={styles.subtitle}>
+              Items you swipe left are kept here.
+            </ThemedText>
+          </View>
+        )}
+
+        {isSelectionMode ? (
+          <View style={styles.selectionHeaderActions}>
+            <TouchableOpacity onPress={selectAll} disabled={isProcessing || items.length === 0} style={styles.headerAction}>
+              <MaterialIcons name={allSelected ? 'deselect' : 'select-all'} size={21} color="#0a7ea4" />
+              <ThemedText style={styles.headerActionText}>{allSelected ? 'Clear' : 'All'}</ThemedText>
+            </TouchableOpacity>
+            <View style={styles.selectedBadge}>
+              <ThemedText style={styles.selectedBadgeText}>{selectedCount}</ThemedText>
+            </View>
+          </View>
+        ) : (
+          <View style={styles.headerActions}>
+            {items.length > 0 && (
+              <TouchableOpacity onPress={() => setIsSelectionMode(true)} style={styles.selectButton} activeOpacity={0.8}>
+                <MaterialIcons name="checklist" size={18} color="#0a7ea4" />
+                <ThemedText style={styles.selectButtonText}>Select</ThemedText>
+              </TouchableOpacity>
+            )}
+            <View style={styles.countBadge}>
+              <ThemedText style={styles.countText}>{stats.count}</ThemedText>
+            </View>
+          </View>
+        )}
       </View>
 
       <View style={[styles.summary, isDark && styles.summaryDark]}>
@@ -191,7 +289,15 @@ export default function TrashScreen() {
           <ThemedText lightColor="#687076" darkColor="#9BA1A6" style={styles.summaryLabel}>Trash size</ThemedText>
           <ThemedText style={styles.summaryValue}>{formatFileSize(stats.totalSize)}</ThemedText>
         </View>
-        <MaterialIcons name="delete-outline" size={34} color="#FF3B30" />
+        <View style={styles.summaryActions}>
+          {items.length > 0 && !isSelectionMode && (
+            <TouchableOpacity onPress={handleEmptyTrash} style={styles.emptyTrashButton} activeOpacity={0.8}>
+              <MaterialIcons name="delete-sweep" size={18} color="#FF3B30" />
+              <ThemedText style={styles.emptyTrashText}>Empty</ThemedText>
+            </TouchableOpacity>
+          )}
+          <MaterialIcons name="delete-outline" size={34} color="#FF3B30" />
+        </View>
       </View>
 
       <View style={[styles.retentionCard, isDark && styles.retentionCardDark]}>
@@ -216,6 +322,7 @@ export default function TrashScreen() {
                 onPress={() => handleRetentionChange(option)}
                 style={[styles.retentionOption, selected && styles.retentionOptionSelected]}
                 activeOpacity={0.8}
+                disabled={isProcessing || isSelectionMode}
               >
                 <ThemedText
                   lightColor="#1C1C1E"
@@ -237,6 +344,8 @@ export default function TrashScreen() {
           data={items}
           keyExtractor={item => item.id}
           renderItem={renderItem}
+          numColumns={2}
+          columnWrapperStyle={styles.columnWrapper}
           contentContainerStyle={items.length === 0 ? styles.emptyList : styles.list}
           refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={handleRefresh} />}
           ListEmptyComponent={
@@ -250,6 +359,28 @@ export default function TrashScreen() {
           }
         />
       )}
+
+      {isSelectionMode && selectedCount > 0 && (
+        <View style={[styles.actionBar, isDark && styles.actionBarDark]}>
+          <TouchableOpacity onPress={handleRestoreSelected} disabled={isProcessing} style={styles.actionButton} activeOpacity={0.8}>
+            <MaterialIcons name="restore" size={20} color="#0a7ea4" />
+            <ThemedText style={styles.restoreActionText}>Restore</ThemedText>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={handleDeleteSelected} disabled={isProcessing} style={styles.actionButton} activeOpacity={0.8}>
+            <MaterialIcons name="delete-forever" size={20} color="#FF3B30" />
+            <ThemedText style={styles.deleteActionText}>Delete</ThemedText>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {isProcessing && (
+        <View style={styles.processingOverlay}>
+          <View style={[styles.processingCard, isDark && styles.processingCardDark]}>
+            <ActivityIndicator size="small" color="#0a7ea4" />
+            <ThemedText style={styles.processingText}>Updating Trash…</ThemedText>
+          </View>
+        </View>
+      )}
     </ThemedView>
   );
 }
@@ -257,14 +388,26 @@ export default function TrashScreen() {
 const styles = StyleSheet.create({
   screen: { flex: 1, paddingTop: 56 },
   header: { paddingHorizontal: 20, paddingBottom: 18, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  headerTitleWrap: { flex: 1 },
   title: { fontSize: 28, fontWeight: '800' },
   subtitle: { fontSize: 12, marginTop: 4 },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  selectionHeaderActions: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  headerAction: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 7, paddingHorizontal: 4 },
+  headerActionText: { color: '#0a7ea4', fontSize: 13, fontWeight: '700' },
+  selectButton: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 8, borderRadius: 10, backgroundColor: 'rgba(10, 126, 164, 0.10)' },
+  selectButtonText: { color: '#0a7ea4', fontSize: 12, fontWeight: '700' },
   countBadge: { minWidth: 40, height: 40, paddingHorizontal: 10, borderRadius: 20, backgroundColor: 'rgba(255, 59, 48, 0.12)', alignItems: 'center', justifyContent: 'center' },
   countText: { color: '#FF3B30', fontWeight: '800', fontSize: 16 },
+  selectedBadge: { minWidth: 34, height: 34, paddingHorizontal: 8, borderRadius: 17, backgroundColor: 'rgba(10, 126, 164, 0.12)', alignItems: 'center', justifyContent: 'center' },
+  selectedBadgeText: { color: '#0a7ea4', fontWeight: '800', fontSize: 14 },
   summary: { marginHorizontal: 20, marginBottom: 12, padding: 16, borderRadius: 16, backgroundColor: '#F2F2F7', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   summaryDark: { backgroundColor: '#1C1C1E' },
   summaryLabel: { fontSize: 12, fontWeight: '500' },
   summaryValue: { fontSize: 20, fontWeight: '800', marginTop: 2 },
+  summaryActions: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  emptyTrashButton: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 9, paddingVertical: 7, borderRadius: 9, backgroundColor: 'rgba(255, 59, 48, 0.10)' },
+  emptyTrashText: { color: '#FF3B30', fontSize: 11, fontWeight: '700' },
   retentionCard: { marginHorizontal: 20, marginBottom: 12, padding: 14, borderRadius: 16, backgroundColor: '#F2F2F7' },
   retentionCardDark: { backgroundColor: '#1C1C1E' },
   retentionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
@@ -277,21 +420,29 @@ const styles = StyleSheet.create({
   retentionOptionSelected: { backgroundColor: '#0a7ea4', borderColor: '#0a7ea4' },
   retentionOptionText: { fontSize: 11, fontWeight: '600' },
   retentionOptionTextSelected: { color: '#FFFFFF' },
-  list: { paddingHorizontal: 16, paddingBottom: 24 },
+  list: { paddingHorizontal: 16, paddingBottom: 110 },
+  columnWrapper: { justifyContent: 'space-between', paddingHorizontal: 4 },
   emptyList: { flexGrow: 1, paddingHorizontal: 20 },
-  row: { minHeight: 120, marginBottom: 10, padding: 10, borderRadius: 16, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: 'rgba(128, 128, 128, 0.15)', flexDirection: 'row', alignItems: 'center' },
-  rowDark: { backgroundColor: '#1C1C1E', borderColor: '#2C2C2E' },
-  thumbnail: { width: 72, height: 72, borderRadius: 12, backgroundColor: '#E5E5EA' },
-  details: { flex: 1, minWidth: 0, paddingHorizontal: 12 },
-  fileName: { fontSize: 14, fontWeight: '700' },
-  meta: { fontSize: 11, marginTop: 3 },
-  expiry: { fontSize: 11, fontWeight: '600', marginTop: 4 },
-  actions: { flexDirection: 'row', gap: 7, marginTop: 8 },
-  restoreButton: { paddingHorizontal: 9, paddingVertical: 7, borderRadius: 9, backgroundColor: 'rgba(10, 126, 164, 0.10)', flexDirection: 'row', alignItems: 'center', gap: 4 },
-  restoreText: { fontSize: 10, fontWeight: '700', color: '#0a7ea4' },
-  deleteButton: { paddingHorizontal: 9, paddingVertical: 7, borderRadius: 9, backgroundColor: 'rgba(255, 59, 48, 0.10)', flexDirection: 'row', alignItems: 'center', gap: 4 },
-  deleteText: { fontSize: 10, fontWeight: '700', color: '#FF3B30' },
+  gridItem: { width: '48%', marginBottom: 14 },
+  thumbnailWrap: { height: 170, borderRadius: 16, overflow: 'hidden', backgroundColor: '#E5E5EA', borderWidth: 2, borderColor: 'transparent' },
+  thumbnailWrapDark: { backgroundColor: '#2C2C2E' },
+  thumbnailWrapSelected: { borderColor: '#0a7ea4' },
+  thumbnail: { width: '100%', height: '100%' },
+  videoBadge: { position: 'absolute', left: 9, bottom: 9, width: 28, height: 28, borderRadius: 14, backgroundColor: 'rgba(0,0,0,0.65)', alignItems: 'center', justifyContent: 'center' },
+  selectionBadge: { position: 'absolute', top: 9, right: 9, width: 26, height: 26, borderRadius: 13, backgroundColor: 'rgba(0,0,0,0.35)', borderWidth: 2, borderColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center' },
+  selectionBadgeSelected: { backgroundColor: '#0a7ea4', borderColor: '#0a7ea4' },
+  fileName: { fontSize: 12, fontWeight: '700', marginTop: 7 },
+  meta: { fontSize: 10, marginTop: 3 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 30 },
   emptyTitle: { fontSize: 19, fontWeight: '700', marginTop: 14 },
   emptyText: { fontSize: 13, textAlign: 'center', marginTop: 6 },
+  actionBar: { position: 'absolute', left: 16, right: 16, bottom: 18, height: 62, borderRadius: 18, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: 'rgba(128, 128, 128, 0.18)', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-around', shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 5 },
+  actionBarDark: { backgroundColor: '#1C1C1E', borderColor: '#2C2C2E' },
+  actionButton: { flexDirection: 'row', alignItems: 'center', gap: 7, paddingHorizontal: 20, paddingVertical: 10 },
+  restoreActionText: { color: '#0a7ea4', fontWeight: '700', fontSize: 13 },
+  deleteActionText: { color: '#FF3B30', fontWeight: '700', fontSize: 13 },
+  processingOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.18)', alignItems: 'center', justifyContent: 'center' },
+  processingCard: { paddingHorizontal: 18, paddingVertical: 14, borderRadius: 14, backgroundColor: '#FFFFFF', flexDirection: 'row', alignItems: 'center', gap: 10 },
+  processingCardDark: { backgroundColor: '#1C1C1E' },
+  processingText: { fontSize: 13, fontWeight: '600' },
 });
