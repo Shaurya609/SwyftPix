@@ -5,7 +5,7 @@ import Animated, { useSharedValue, useAnimatedStyle, withSpring, withTiming, run
 import * as WebBrowser from 'expo-web-browser';
 import { Image } from 'expo-image';
 import { useVideoPlayer, VideoView } from 'expo-video';
-import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
+import { useAudioPlayer, useAudioPlayerStatus, setIsAudioActiveAsync } from 'expo-audio';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { MockMediaItem } from '../types/media';
 import { MediaPreviewContainer } from './media-preview-container';
@@ -25,15 +25,27 @@ const FullscreenAudioPreview = ({ uri }: { uri: string }) => {
   const [timelineWidth, setTimelineWidth] = useState(0);
 
   useEffect(() => {
+    // The hook owns the player's lifecycle and releases it on unmount.
+    // Do not call player.pause() from cleanup: React/Expo can release the
+    // native SharedObject before this cleanup runs, which causes the
+    // "Cannot use shared object that was already released" error.
+    setIsAudioActiveAsync(true)
+      .catch((error) => console.warn('[AudioPreview] Unable to activate audio:', error));
     player.play();
+
     return () => {
-      player.pause();
+      // Disable the app audio subsystem globally so an orphaned development
+      // player cannot continue playing after the preview modal closes.
+      // This is intentionally not player.pause(), because the hook owns and
+      // releases that player automatically.
+      setIsAudioActiveAsync(false).catch(() => {});
     };
   }, [player]);
 
   const togglePlayback = () => {
     if (status.playing) { player.pause(); return; }
     if (status.didJustFinish || (status.duration > 0 && status.currentTime >= status.duration)) player.seekTo(0);
+    setIsAudioActiveAsync(true).catch(() => {});
     player.play();
   };
 
