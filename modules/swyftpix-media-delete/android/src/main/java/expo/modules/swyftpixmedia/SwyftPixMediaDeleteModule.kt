@@ -135,9 +135,11 @@ class SwyftPixMediaDeleteModule : Module() {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
       findInCollection(resolver, MediaStore.Images.Media.EXTERNAL_CONTENT_URI, "images", fileName, relativePath)?.let { return it }
       findInCollection(resolver, MediaStore.Video.Media.EXTERNAL_CONTENT_URI, "videos", fileName, relativePath)?.let { return it }
+      findInCollection(resolver, MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, "audio", fileName, relativePath)?.let { return it }
 
       findByDisplayName(resolver, MediaStore.Images.Media.EXTERNAL_CONTENT_URI, "images", fileName)?.let { return it }
       findByDisplayName(resolver, MediaStore.Video.Media.EXTERNAL_CONTENT_URI, "videos", fileName)?.let { return it }
+      findByDisplayName(resolver, MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, "audio", fileName)?.let { return it }
     }
 
     val collection = MediaStore.Files.getContentUri("external")
@@ -157,6 +159,7 @@ class SwyftPixMediaDeleteModule : Module() {
         when (mediaType) {
           MediaStore.Files.FileColumns.MEDIA_TYPE_IMAGE -> ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id)
           MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO -> ContentUris.withAppendedId(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, id)
+          MediaStore.Files.FileColumns.MEDIA_TYPE_AUDIO -> ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id)
           else -> ContentUris.withAppendedId(collection, id)
         }
       }
