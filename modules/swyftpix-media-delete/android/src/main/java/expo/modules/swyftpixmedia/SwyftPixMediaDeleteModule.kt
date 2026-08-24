@@ -1,6 +1,7 @@
 package expo.modules.swyftpixmedia
 
 import android.app.Activity
+import android.content.ContentUris
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -18,11 +19,7 @@ class SwyftPixMediaDeleteModule : Module() {
   companion object {
     private const val TAG = "SwyftPixMediaDelete"
     private const val DELETE_REQUEST_CODE = 47261
-    private val PROTECTED_PATH_PREFIXES = listOf(
-      "Android/",
-      "Android/data/",
-      "Android/obb/"
-    )
+    private val PROTECTED_PATH_PREFIXES = listOf("Android/", "Android/data/", "Android/obb/")
   }
 
   private var pendingPromise: Promise? = null
@@ -51,16 +48,8 @@ class SwyftPixMediaDeleteModule : Module() {
       }
     }
 
-    /**
-     * Broad shared-storage access is the primary Android scanner permission for SwyftPix.
-     * Android exposes this as a special app access rather than a runtime permission dialog.
-     */
     Function("hasAllFilesAccess") {
-      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-        Environment.isExternalStorageManager()
-      } else {
-        true
-      }
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) Environment.isExternalStorageManager() else true
     }
 
     Function("requestAllFilesAccess") {
@@ -147,8 +136,6 @@ class SwyftPixMediaDeleteModule : Module() {
     val normalized = relativePath.replace('\\', '/').removePrefix("/")
     if (normalized.contains("../") || normalized == "..") return false
     if (isProtectedRelativePath(normalized)) return false
-    // Shared-storage files with no relative path are still valid user files.
-    // The protected Android tree is excluded above; app-private storage is not exposed by MediaStore.Files.
     return true
   }
 
@@ -158,7 +145,11 @@ class SwyftPixMediaDeleteModule : Module() {
       return emptyList()
     }
 
-    val collection = MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+    val collection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+      MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+    } else {
+      MediaStore.Files.getContentUri("external")
+    }
     val projection = arrayOf(
       MediaStore.Files.FileColumns._ID,
       MediaStore.Files.FileColumns.DISPLAY_NAME,
@@ -187,31 +178,19 @@ class SwyftPixMediaDeleteModule : Module() {
         val mediaTypeIndex = cursor.getColumnIndex(MediaStore.Files.FileColumns.MEDIA_TYPE)
 
         while (cursor.moveToNext() && results.size < limit) {
-          val mediaType = if (mediaTypeIndex >= 0) {
-            cursor.getInt(mediaTypeIndex)
-          } else {
-            MediaStore.Files.FileColumns.MEDIA_TYPE_NONE
-          }
+          val mediaType = if (mediaTypeIndex >= 0) cursor.getInt(mediaTypeIndex) else MediaStore.Files.FileColumns.MEDIA_TYPE_NONE
           if (mediaType != MediaStore.Files.FileColumns.MEDIA_TYPE_NONE) continue
 
           val name = cursor.getString(nameIndex) ?: continue
-          val relativePath = if (relativeIndex >= 0 && !cursor.isNull(relativeIndex)) {
-            cursor.getString(relativeIndex)
-          } else {
-            ""
-          }
+          val relativePath = if (relativeIndex >= 0 && !cursor.isNull(relativeIndex)) cursor.getString(relativeIndex) else ""
           if (!isSafeSharedFile(relativePath, name)) continue
 
-          val mimeType = if (mimeIndex >= 0 && !cursor.isNull(mimeIndex)) {
-            cursor.getString(mimeIndex)
-          } else {
-            "application/octet-stream"
-          }
+          val mimeType = if (mimeIndex >= 0 && !cursor.isNull(mimeIndex)) cursor.getString(mimeIndex) else "application/octet-stream"
           val fileCategory = classifyFile(name, mimeType)
           if (category != "all" && fileCategory != category) continue
 
           val id = cursor.getLong(idIndex)
-          val uri = MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY, id).toString()
+          val uri = ContentUris.withAppendedId(collection, id).toString()
           if (!seen.add(uri)) continue
 
           val size = if (sizeIndex >= 0 && !cursor.isNull(sizeIndex)) cursor.getLong(sizeIndex) else 0L
@@ -242,11 +221,8 @@ class SwyftPixMediaDeleteModule : Module() {
       "zip", "rar", "7z", "tar", "gz", "bz2", "xz", "tgz" -> "archive"
       "apk", "xapk", "apks", "aab" -> "apk"
       else -> if (
-        mimeType.startsWith("text/") ||
-        mimeType.contains("pdf") ||
-        mimeType.contains("document") ||
-        mimeType.contains("spreadsheet") ||
-        mimeType.contains("presentation")
+        mimeType.startsWith("text/") || mimeType.contains("pdf") || mimeType.contains("document") ||
+        mimeType.contains("spreadsheet") || mimeType.contains("presentation")
       ) "document" else "other"
     }
   }
@@ -263,11 +239,7 @@ class SwyftPixMediaDeleteModule : Module() {
       findInCollection(resolver, MediaStore.Video.Media.EXTERNAL_CONTENT_URI, "videos", fileName, relativePath)?.let { return it }
       findInCollection(resolver, MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, "audio", fileName, relativePath)?.let { return it }
     }
-    val collection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-      MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
-    } else {
-      MediaStore.Files.getContentUri("external")
-    }
+    val collection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY) else MediaStore.Files.getContentUri("external")
     return try {
       resolver.query(
         collection,
