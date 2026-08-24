@@ -1,5 +1,6 @@
 import { Platform } from 'react-native';
 import { requireNativeModule } from 'expo-modules-core';
+import { hasAllFilesAccess, requestAllFilesAccess } from '../modules/swyftpix-media-delete';
 
 type FileAccessCategory = 'document' | 'archive' | 'apk' | 'other' | 'all';
 
@@ -28,33 +29,42 @@ function getNativeFileAccess(): NativeFileAccessModule | null {
   try {
     return requireNativeModule<NativeFileAccessModule>('SwyftPixFileAccess');
   } catch (error) {
-    console.warn('[FileAccess] Native file access module is unavailable:', error);
+    console.warn('[FileAccess] Legacy SAF module is unavailable:', error);
     return null;
   }
 }
 
-/** Platform-neutral entry point for user-authorized non-media file access. */
+/**
+ * SwyftPix uses Android All Files Access as the primary storage-scanning
+ * capability. This avoids forcing users to manually select Download,
+ * Documents, WhatsApp and other folders one by one.
+ */
 export function hasUserFileAccess(): boolean {
-  return getNativeFileAccess()?.hasAccess() ?? false;
+  if (Platform.OS === 'android') return hasAllFilesAccess();
+  return false;
 }
 
-/** Opens the platform file/folder picker for a user-selected directory. */
+/** Opens Android's All Files Access settings. SAF remains available in the native module as a fallback. */
 export async function requestUserDirectoryAccess(): Promise<boolean> {
-  return (await getNativeFileAccess()?.pickDirectory()) ?? false;
+  if (Platform.OS === 'android') return requestAllFilesAccess();
+  return false;
 }
 
-/** Opens the platform file picker for individual files when folder access is unavailable or unsuitable. */
+/** Compatibility entry point: broad storage access is preferred over individual file selection. */
 export async function requestUserFileAccess(): Promise<boolean> {
-  return (await getNativeFileAccess()?.pickFiles()) ?? false;
+  if (Platform.OS === 'android') return requestAllFilesAccess();
+  return false;
 }
 
+/** Legacy SAF listing retained as a fallback; normal Android scanning uses listSharedFiles(). */
 export async function listUserFiles(category: FileAccessCategory, limit = 40): Promise<UserFileAccessItem[]> {
   const nativeModule = getNativeFileAccess();
   if (!nativeModule) return [];
   try {
+    if (!nativeModule.hasAccess()) return [];
     return await nativeModule.listFiles(category, limit);
   } catch (error) {
-    console.warn('[FileAccess] User-authorized file discovery failed:', error);
+    console.warn('[FileAccess] Legacy user-authorized file discovery failed:', error);
     return [];
   }
 }
