@@ -1,5 +1,5 @@
 import React, { useState, useRef, useMemo, useEffect, useCallback } from 'react';
-import { StyleSheet, View, Text, TouchableOpacity, ActivityIndicator, Alert, Platform } from 'react-native';
+import { StyleSheet, View, Text, TouchableOpacity, ActivityIndicator, Alert, Platform, ScrollView } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from 'expo-router';
@@ -11,7 +11,6 @@ import { MediaReviewCard, MediaReviewCardRef } from '@/components/media-review-c
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import { formatFileSize } from '@/utils/formatters';
 import { MockMediaItem } from '@/types/media';
 import { checkAndRequestPermissions, fetchDeviceMediaPage } from '@/utils/device-media';
 import { canManageMedia, requestMediaManagementAccess } from '@/modules/swyftpix-media-delete';
@@ -193,17 +192,24 @@ export default function HomeScreen() {
 
   const categorySelection = (
     <View style={styles.categoryContainer}>
-      <ThemedText style={styles.categoryHeading} type="title">What do you want to clean?</ThemedText>
-      <ThemedText style={styles.categorySubheading} lightColor="#687076" darkColor="#9BA1A6">Choose a file type to start swiping.</ThemedText>
-      <View style={styles.categoryGrid}>
-        {CATEGORIES.map(category => (
-          <TouchableOpacity key={category.id} style={[styles.categoryCard, isDark ? styles.categoryCardDark : styles.categoryCardLight]} onPress={() => handleSelectCategory(category.id)} activeOpacity={0.85}>
-            <View style={styles.categoryIcon}><MaterialIcons name={category.icon as any} size={34} color="#0a7ea4" /></View>
-            <ThemedText style={styles.categoryLabel} type="defaultSemiBold">{category.label}</ThemedText>
-            <ThemedText style={styles.categorySubtitle} lightColor="#687076" darkColor="#9BA1A6">{category.subtitle}</ThemedText>
-          </TouchableOpacity>
-        ))}
-      </View>
+      <ScrollView
+        style={styles.categoryScroll}
+        contentContainerStyle={styles.categoryScrollContent}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
+        <ThemedText style={styles.categoryHeading} type="title">What do you want to clean?</ThemedText>
+        <ThemedText style={styles.categorySubheading} lightColor="#687076" darkColor="#9BA1A6">Choose a file type to start swiping.</ThemedText>
+        <View style={styles.categoryGrid}>
+          {CATEGORIES.map(category => (
+            <TouchableOpacity key={category.id} style={[styles.categoryCard, isDark ? styles.categoryCardDark : styles.categoryCardLight]} onPress={() => handleSelectCategory(category.id)} activeOpacity={0.85}>
+              <View style={styles.categoryIcon}><MaterialIcons name={category.icon as any} size={34} color="#0a7ea4" /></View>
+              <ThemedText style={styles.categoryLabel} type="defaultSemiBold">{category.label}</ThemedText>
+              <ThemedText style={styles.categorySubtitle} lightColor="#687076" darkColor="#9BA1A6">{category.subtitle}</ThemedText>
+            </TouchableOpacity>
+          ))}
+        </View>
+      </ScrollView>
     </View>
   );
 
@@ -259,18 +265,20 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   screen: { flex: 1, paddingHorizontal: 16 },
-  header: { paddingTop: 8, paddingBottom: 10 },
+  header: { paddingTop: 8, paddingBottom: 8 },
   headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   headerTitle: { fontSize: 28 },
   headerSubtitle: { fontSize: 13, marginTop: 2 },
-  categoryContainer: { flex: 1, justifyContent: 'center' },
+  categoryContainer: { flex: 1, minHeight: 0 },
+  categoryScroll: { flex: 1 },
+  categoryScrollContent: { paddingTop: 8, paddingBottom: 28 },
   categoryHeading: { fontSize: 25, textAlign: 'center', marginBottom: 6 },
-  categorySubheading: { fontSize: 14, textAlign: 'center', marginBottom: 20 },
-  categoryGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', gap: 12 },
-  categoryCard: { width: '48%', minHeight: 128, borderRadius: 18, padding: 14, justifyContent: 'center', alignItems: 'center', borderWidth: 1 },
+  categorySubheading: { fontSize: 14, textAlign: 'center', marginBottom: 16 },
+  categoryGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: 10 },
+  categoryCard: { width: '48%', minHeight: 118, borderRadius: 18, paddingHorizontal: 12, paddingVertical: 12, justifyContent: 'center', alignItems: 'center', borderWidth: 1 },
   categoryCardLight: { backgroundColor: '#fff', borderColor: '#e5e7eb' },
   categoryCardDark: { backgroundColor: '#151718', borderColor: '#2b2f31' },
-  categoryIcon: { width: 58, height: 58, borderRadius: 18, alignItems: 'center', justifyContent: 'center', marginBottom: 8, backgroundColor: 'rgba(10,126,164,0.10)' },
+  categoryIcon: { width: 54, height: 54, borderRadius: 17, alignItems: 'center', justifyContent: 'center', marginBottom: 7, backgroundColor: 'rgba(10,126,164,0.10)' },
   categoryLabel: { fontSize: 16 },
   categorySubtitle: { fontSize: 11, textAlign: 'center', marginTop: 3 },
   modeHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
