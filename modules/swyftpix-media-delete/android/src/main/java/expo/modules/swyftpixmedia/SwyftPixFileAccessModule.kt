@@ -72,7 +72,10 @@ class SwyftPixFileAccessModule : Module() {
         return@OnActivityResult
       }
 
-      val data = payload.data
+      val data = payload.data ?: run {
+        promise.resolve(false)
+        return@OnActivityResult
+      }
       val takeFlags = data.flags and (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
       val uris = mutableListOf<Uri>()
       data.data?.let { uris.add(it) }
@@ -110,7 +113,7 @@ class SwyftPixFileAccessModule : Module() {
       return
     }
     try {
-      val intent = Intent(action).apply {
+      val intent: Intent = Intent(action).apply {
         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
         addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
