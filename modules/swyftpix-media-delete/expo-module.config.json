@@ -1,6 +1,9 @@
 {
   "platforms": ["android"],
   "android": {
-    "modules": ["expo.modules.swyftpixmedia.SwyftPixMediaDeleteModule"]
+    "modules": [
+      "expo.modules.swyftpixmedia.SwyftPixMediaDeleteModule",
+      "expo.modules.swyftpixmedia.SwyftPixFileAccessModule"
+    ]
   }
 }
