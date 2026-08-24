@@ -17,34 +17,54 @@ export function MediaPreviewContainer({ item, isTop }: MediaPreviewContainerProp
   const isDark = colorScheme === 'dark';
 
   const isVideo = item.fileType === 'video';
-  const isDoc = item.fileType === 'pdf';
+  const isAudio = item.fileType === 'audio';
+  const isVisual = ['photo', 'screenshot', 'whatsapp'].includes(item.fileType);
+  const isDocument = ['pdf', 'document'].includes(item.fileType);
 
-  // Get color for source badges
   const getSourceBadgeColor = (source: string) => {
     switch (source) {
-      case 'Camera':
-        return '#007AFF'; // iOS blue
-      case 'Screenshots':
-        return '#AF52DE'; // iOS purple
-      case 'WhatsApp':
-        return '#34C759'; // WhatsApp green
-      case 'Downloads':
-        return '#FF9500'; // iOS orange
-      case 'Documents':
-        return '#5856D6'; // iOS indigo
-      case 'Videos':
-        return '#FF2D55'; // iOS pink/rose
-      default:
-        return '#8E8E93';
+      case 'Camera': return '#007AFF';
+      case 'Screenshots': return '#AF52DE';
+      case 'WhatsApp': return '#34C759';
+      case 'Downloads': return '#FF9500';
+      case 'Documents': return '#5856D6';
+      case 'Videos': return '#FF2D55';
+      case 'Music': return '#5856D6';
+      case 'Archives': return '#8E8E93';
+      case 'APKs': return '#34C759';
+      default: return '#8E8E93';
+    }
+  };
+
+  const getFileIcon = () => {
+    switch (item.fileType) {
+      case 'video': return 'videocam';
+      case 'audio': return 'audiotrack';
+      case 'pdf': return 'picture-as-pdf';
+      case 'document': return 'description';
+      case 'archive': return 'folder-zip';
+      case 'apk': return 'android';
+      case 'screenshot': return 'phonelink-setup';
+      case 'whatsapp': return 'chat';
+      default: return 'photo';
+    }
+  };
+
+  const getGenericColor = () => {
+    switch (item.fileType) {
+      case 'audio': return '#6C5CE7';
+      case 'pdf': return '#FF3B30';
+      case 'document': return '#3478F6';
+      case 'archive': return '#8E8E93';
+      case 'apk': return '#34C759';
+      default: return '#0A7EA4';
     }
   };
 
   return (
     <View style={[styles.card, isDark ? styles.cardDark : styles.cardLight]}>
-      {/* Media Preview Aspect Area */}
       <View style={styles.previewContainer}>
-        {isDoc ? (
-          /* Visual Media Image Preview for Documents/PDFs */
+        {isVisual ? (
           <View style={styles.imageWrapper}>
             <Image
               source={{ uri: item.uri }}
@@ -52,24 +72,6 @@ export function MediaPreviewContainer({ item, isTop }: MediaPreviewContainerProp
               contentFit="cover"
               transition={200}
             />
-            {/* Elegant overlay to indicate it's a PDF */}
-            <View style={styles.videoOverlay}>
-              <View style={[styles.playButton, { backgroundColor: 'rgba(255, 255, 255, 0.95)', borderColor: '#FF3B30' }]}>
-                <MaterialIcons name="picture-as-pdf" size={36} color="#FF3B30" />
-              </View>
-            </View>
-          </View>
-        ) : (
-          /* Visual Media Image Preview (Photos, Screenshots, Video covers) */
-          <View style={styles.imageWrapper}>
-            <Image
-              source={{ uri: item.uri }}
-              style={styles.image}
-              contentFit="cover"
-              transition={200}
-            />
-            
-            {/* Play Button Overlay for Videos */}
             {isVideo && (
               <View style={styles.videoOverlay}>
                 <View style={styles.playButton}>
@@ -83,28 +85,30 @@ export function MediaPreviewContainer({ item, isTop }: MediaPreviewContainerProp
               </View>
             )}
           </View>
+        ) : (
+          <View style={[styles.genericPreview, { backgroundColor: isDark ? '#202124' : '#F2F2F7' }]}>
+            <View style={[styles.genericIconCircle, { backgroundColor: getGenericColor() }]}>
+              <MaterialIcons name={getFileIcon() as any} size={52} color="#FFFFFF" />
+            </View>
+            <Text style={[styles.genericTypeLabel, { color: isDark ? '#FFFFFF' : '#333333' }]}>
+              {isAudio ? 'AUDIO FILE' : isDocument ? item.fileType.toUpperCase() : item.fileType.toUpperCase()}
+            </Text>
+            {item.duration && (
+              <View style={styles.durationBadge}>
+                <Text style={styles.durationText}>{item.duration}</Text>
+              </View>
+            )}
+          </View>
         )}
 
-        {/* Source/Category Badge */}
         <View style={[styles.sourceBadge, { backgroundColor: getSourceBadgeColor(item.source) }]}>
           <Text style={styles.sourceText}>{item.source}</Text>
         </View>
 
-        {/* File Type Indicator Icon Overlay */}
         <View style={[styles.typeOverlay, isDark ? styles.typeOverlayDark : styles.typeOverlayLight]}>
-          <MaterialIcons 
-            name={
-              item.fileType === 'video' ? 'videocam' :
-              item.fileType === 'pdf' ? 'description' :
-              item.fileType === 'screenshot' ? 'phonelink-setup' :
-              item.fileType === 'whatsapp' ? 'chat' : 'photo'
-            } 
-            size={16} 
-            color={isDark ? '#FFF' : '#333'} 
-          />
+          <MaterialIcons name={getFileIcon() as any} size={16} color={isDark ? '#FFF' : '#333'} />
         </View>
 
-        {/* Interactive Full Preview Prompter */}
         {isTop && (
           <View style={styles.inspectPrompt}>
             <MaterialIcons name="visibility" size={14} color="#FFF" />
@@ -113,7 +117,6 @@ export function MediaPreviewContainer({ item, isTop }: MediaPreviewContainerProp
         )}
       </View>
 
-      {/* Info & Metadata Area */}
       <View style={styles.infoContainer}>
         <View style={styles.nameRow}>
           <ThemedText type="defaultSemiBold" style={styles.fileName} numberOfLines={1}>
@@ -123,9 +126,7 @@ export function MediaPreviewContainer({ item, isTop }: MediaPreviewContainerProp
 
         <View style={styles.metaGrid}>
           <View style={styles.metaColumn}>
-            <Text style={[styles.metaLabel, isDark ? styles.labelDark : styles.labelLight]}>
-              SIZE
-            </Text>
+            <Text style={[styles.metaLabel, isDark ? styles.labelDark : styles.labelLight]}>SIZE</Text>
             <ThemedText type="defaultSemiBold" style={styles.metaValue}>
               {formatFileSize(item.fileSize)}
             </ThemedText>
@@ -134,9 +135,7 @@ export function MediaPreviewContainer({ item, isTop }: MediaPreviewContainerProp
           <View style={[styles.divider, { backgroundColor: isDark ? '#3A3A3C' : '#E5E5EA' }]} />
 
           <View style={styles.metaColumn}>
-            <Text style={[styles.metaLabel, isDark ? styles.labelDark : styles.labelLight]}>
-              CREATED
-            </Text>
+            <Text style={[styles.metaLabel, isDark ? styles.labelDark : styles.labelLight]}>CREATED</Text>
             <ThemedText type="defaultSemiBold" style={styles.metaValue}>
               {formatDate(item.dateCreated)}
             </ThemedText>
@@ -183,42 +182,30 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
   },
-  docPreview: {
+  genericPreview: {
     width: '100%',
     height: '100%',
     justifyContent: 'center',
     alignItems: 'center',
     padding: 24,
   },
-  docIconCircle: {
-    width: 90,
-    height: 90,
-    borderRadius: 45,
-    backgroundColor: '#FFFFFF',
+  genericIconCircle: {
+    width: 110,
+    height: 110,
+    borderRadius: 55,
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: '#000',
+    shadowColor: '#000000',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 6,
-    elevation: 3,
-    marginBottom: 16,
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 4,
+    marginBottom: 18,
   },
-  docPlaceholderText: {
-    fontSize: 16,
-    textAlign: 'center',
-    color: '#333333',
-    marginBottom: 20,
-  },
-  docLinesContainer: {
-    width: '80%',
-    alignItems: 'center',
-    gap: 8,
-  },
-  docLine: {
-    height: 6,
-    backgroundColor: 'rgba(0, 0, 0, 0.08)',
-    borderRadius: 3,
+  genericTypeLabel: {
+    fontSize: 15,
+    fontWeight: '800',
+    letterSpacing: 1.5,
   },
   videoOverlay: {
     ...StyleSheet.absoluteFillObject,
