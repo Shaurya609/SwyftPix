@@ -1,30 +1,51 @@
 import { Platform } from 'react-native';
 import { requireNativeModule } from 'expo-modules-core';
 
+type NativeSharedFile = {
+  id: string;
+  fileName: string;
+  fileType: 'document' | 'archive' | 'apk' | 'other';
+  mimeType: string;
+  fileSize: number;
+  dateModified: number;
+  relativePath: string;
+  uri: string;
+};
+
 type NativeMediaDeleteModule = {
   deleteMediaByPath(path: string): Promise<boolean>;
   canManageMedia(): boolean;
   requestMediaManagementAccess(): boolean;
+  listSharedFiles(category: 'document' | 'archive' | 'apk' | 'other' | 'all', limit: number): NativeSharedFile[];
 };
 
 export function canManageMedia(): boolean {
   const nativeModule = getNativeMediaDelete();
   if (!nativeModule) return false;
-
   return nativeModule.canManageMedia();
 }
 
 export function requestMediaManagementAccess(): boolean {
   const nativeModule = getNativeMediaDelete();
   if (!nativeModule) return false;
-
   return nativeModule.requestMediaManagementAccess();
 }
-/**
- * Load the native module lazily. This is important because Expo Go does not
- * contain SwyftPix's custom native module. Eagerly calling requireNativeModule
- * at import time prevents expo-router from loading any routes at all.
- */
+
+export function listSharedFiles(
+  category: 'document' | 'archive' | 'apk' | 'apks' | 'other' | 'all',
+  limit = 40
+): NativeSharedFile[] {
+  const nativeModule = getNativeMediaDelete();
+  if (!nativeModule) return [];
+
+  try {
+    return nativeModule.listSharedFiles(category === 'apks' ? 'apk' : category, limit);
+  } catch (error) {
+    console.warn('[SwyftPixMediaDelete] Shared file discovery failed:', error);
+    return [];
+  }
+}
+
 function getNativeMediaDelete(): NativeMediaDeleteModule | null {
   if (Platform.OS !== 'android') return null;
 
