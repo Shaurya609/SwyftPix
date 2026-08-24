@@ -96,8 +96,8 @@ export const MediaReviewCard = forwardRef<MediaReviewCardRef, MediaReviewCardPro
   };
 
   const panGesture = Gesture.Pan().onUpdate(e => { translateX.value = e.translationX; translateY.value = e.translationY; }).onEnd(e => {
-    if (e.translationX > threshold) animateSwipe('right');
-    else if (e.translationX < -threshold) animateSwipe('left');
+    if (e.translationX > threshold) runOnJS(animateSwipe)('right');
+    else if (e.translationX < -threshold) runOnJS(animateSwipe)('left');
     else { translateX.value = withSpring(0, { damping: 15 }); translateY.value = withSpring(0, { damping: 15 }); }
   });
   const tapGesture = Gesture.Tap().onEnd(() => runOnJS(setIsPreviewVisible)(true));
