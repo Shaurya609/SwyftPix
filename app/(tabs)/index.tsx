@@ -18,7 +18,7 @@ import { canManageMedia, requestMediaManagementAccess } from '@/modules/swyftpix
 import { initialize, trashAsset, restoreAsset, keepAsset, undoKeep, getReviewedAssetIds, getTrashedAssets } from '@/utils/trash-service';
 
 interface SwipeHistory { item: MockMediaItem; direction: 'left' | 'right'; }
-type HomeCategory = 'photo' | 'video' | 'audio' | 'document' | 'archive' | 'apk' | 'other' | 'all';
+type HomeCategory = 'photo' | 'video' | 'audio' | 'document' | 'archive' | 'apk' | 'all';
 
 const CATEGORIES: Array<{ id: HomeCategory; label: string; subtitle: string; icon: string }> = [
   { id: 'photo', label: 'Photos', subtitle: 'Images & screenshots', icon: 'photo-library' },
@@ -27,7 +27,6 @@ const CATEGORIES: Array<{ id: HomeCategory; label: string; subtitle: string; ico
   { id: 'document', label: 'Documents', subtitle: 'PDFs, Office & text files', icon: 'description' },
   { id: 'archive', label: 'Archives', subtitle: 'ZIP, RAR & compressed files', icon: 'folder-zip' },
   { id: 'apk', label: 'APKs', subtitle: 'Android installers', icon: 'android' },
-  { id: 'other', label: 'Other Files', subtitle: 'Other shared files', icon: 'insert-drive-file' },
   { id: 'all', label: 'All Media', subtitle: 'Everything SwyftPix can review', icon: 'collections' },
 ];
 
@@ -37,7 +36,7 @@ function matchesCategory(item: MockMediaItem, category: HomeCategory): boolean {
 }
 
 function isFileCategory(category: HomeCategory | null): boolean {
-  return category === 'document' || category === 'archive' || category === 'apk' || category === 'other';
+  return category === 'document' || category === 'archive' || category === 'apk';
 }
 
 export default function HomeScreen() {
@@ -87,15 +86,10 @@ export default function HomeScreen() {
     }
     Alert.alert(
       'Allow SwyftPix to manage storage?',
-      'SwyftPix needs broad shared-storage access to find documents, APKs, archives and other user files automatically. It will not scan Android system or app-private directories, and protected locations are excluded before files reach the review queue.',
+      'SwyftPix needs broad shared-storage access to find documents, APKs and archives automatically. It will not scan Android system or app-private directories, and protected locations are excluded before files reach the review queue.',
       [
         { text: 'Not now', style: 'cancel' },
-        { text: 'Open Android Settings', onPress: async () => {
-          const opened = await requestUserDirectoryAccess();
-          if (!opened) return;
-          // The settings screen does not return the grant state immediately.
-          // useFocusEffect refreshes it when the user returns to SwyftPix.
-        } },
+        { text: 'Open Android Settings', onPress: async () => { await requestUserDirectoryAccess(); } },
       ],
     );
   }, []);
@@ -110,9 +104,7 @@ export default function HomeScreen() {
     try {
       const reviewedIds = await getReviewedAssetIds();
       if (isFileCategory(category) && !hasFileAccess) {
-        setItems([]);
-        setEndCursor(undefined); setHasNextPage(false);
-        return;
+        setItems([]); setEndCursor(undefined); setHasNextPage(false); return;
       }
       if (!hasPermission && !isFileCategory(category)) {
         setItems(filterItems(MOCK_MEDIA_ITEMS, category, reviewedIds));
@@ -124,8 +116,7 @@ export default function HomeScreen() {
       setItems(filterItems(result.items, category, reviewedIds));
       setEndCursor(result.endCursor); setHasNextPage(result.hasNextPage);
     } catch (err) {
-      console.error('[HomeScreen] Error loading category:', err);
-      setItems([]);
+      console.error('[HomeScreen] Error loading category:', err); setItems([]);
     } finally { setIsLoadingDeviceMedia(false); }
   }, [filterItems, hasPermission, hasFileAccess]);
 
@@ -204,28 +195,21 @@ export default function HomeScreen() {
 
   const handleSwipeLeft = async (item: MockMediaItem) => {
     if (items.length === 0 || items[0].id !== item.id) return;
-    try {
-      await trashAsset(item); setHistory(h => h.some(e => e.item.id === item.id) ? h : [...h, { item, direction: 'left' }]);
-      setDeletedItems(d => d.some(i => i.id === item.id) ? d : [...d, item]); setItems(prev => prev.length && prev[0].id === item.id ? prev.slice(1) : prev);
-    } catch (err) { console.error('[HomeScreen] Error persisting trash action:', err); }
+    try { await trashAsset(item); setHistory(h => h.some(e => e.item.id === item.id) ? h : [...h, { item, direction: 'left' }]); setDeletedItems(d => d.some(i => i.id === item.id) ? d : [...d, item]); setItems(prev => prev.length && prev[0].id === item.id ? prev.slice(1) : prev); }
+    catch (err) { console.error('[HomeScreen] Error persisting trash action:', err); }
   };
 
   const handleSwipeRight = async (item: MockMediaItem) => {
     if (items.length === 0 || items[0].id !== item.id) return;
-    try {
-      await keepAsset(item.id); setHistory(h => h.some(e => e.item.id === item.id) ? h : [...h, { item, direction: 'right' }]);
-      setKeptItems(k => k.some(i => i.id === item.id) ? k : [...k, item]); setItems(prev => prev.length && prev[0].id === item.id ? prev.slice(1) : prev);
-    } catch (err) { console.error('[HomeScreen] Error persisting keep action:', err); }
+    try { await keepAsset(item.id); setHistory(h => h.some(e => e.item.id === item.id) ? h : [...h, { item, direction: 'right' }]); setKeptItems(k => k.some(i => i.id === item.id) ? k : [...k, item]); setItems(prev => prev.length && prev[0].id === item.id ? prev.slice(1) : prev); }
+    catch (err) { console.error('[HomeScreen] Error persisting keep action:', err); }
   };
 
   const handleUndo = async () => {
     if (!history.length) return;
     const lastSwipe = history[history.length - 1];
-    try {
-      if (lastSwipe.direction === 'left') await restoreAsset(lastSwipe.item.id); else await undoKeep(lastSwipe.item.id);
-      setHistory(h => h.slice(0, -1)); setDeletedItems(d => d.filter(i => i.id !== lastSwipe.item.id)); setKeptItems(k => k.filter(i => i.id !== lastSwipe.item.id));
-      setItems(prev => prev.some(i => i.id === lastSwipe.item.id) ? prev : [lastSwipe.item, ...prev]);
-    } catch (err) { console.error('[HomeScreen] Error persisting undo action:', err); }
+    try { if (lastSwipe.direction === 'left') await restoreAsset(lastSwipe.item.id); else await undoKeep(lastSwipe.item.id); setHistory(h => h.slice(0, -1)); setDeletedItems(d => d.filter(i => i.id !== lastSwipe.item.id)); setKeptItems(k => k.filter(i => i.id !== lastSwipe.item.id)); setItems(prev => prev.some(i => i.id === lastSwipe.item.id) ? prev : [lastSwipe.item, ...prev]); }
+    catch (err) { console.error('[HomeScreen] Error persisting undo action:', err); }
   };
 
   const handleReset = async () => { setHistory([]); setKeptItems([]); if (selectedCategory) await loadFirstPage(selectedCategory); };
@@ -253,65 +237,32 @@ export default function HomeScreen() {
       <View style={[styles.emptyCard, isDark ? styles.emptyCardDark : styles.emptyCardLight]}>
         <View style={styles.emptyIconContainer}><MaterialIcons name="folder-open" size={44} color="#0a7ea4" /></View>
         <ThemedText style={styles.emptyTitle}>Enable storage access</ThemedText>
-        <ThemedText style={styles.emptyDescription} lightColor="#687076" darkColor="#9BA1A6">SwyftPix needs Android's All Files Access to automatically find documents, APKs, archives and other shared files. Protected Android system and app-private locations are excluded from scanning.</ThemedText>
+        <ThemedText style={styles.emptyDescription} lightColor="#687076" darkColor="#9BA1A6">SwyftPix needs Android's All Files Access to automatically find documents, APKs and archives. Protected Android system and app-private locations are excluded from scanning.</ThemedText>
         <TouchableOpacity style={styles.resetButton} onPress={requestFileAccessSetup} activeOpacity={0.8}><ThemedText style={styles.resetButtonText}>Allow Storage Access</ThemedText></TouchableOpacity>
       </View>
     </View>
   );
 
-  const fileAccessUnavailableCard = (
-    <View style={styles.emptyContainer}>
-      <View style={[styles.emptyCard, isDark ? styles.emptyCardDark : styles.emptyCardLight]}>
-        <View style={styles.emptyIconContainer}><MaterialIcons name="info-outline" size={44} color="#0a7ea4" /></View>
-        <ThemedText style={styles.emptyTitle}>File cleanup unavailable</ThemedText>
-        <ThemedText style={styles.emptyDescription} lightColor="#687076" darkColor="#9BA1A6">This platform's document and file provider has not been enabled yet. Your supported media categories remain available.</ThemedText>
-        <TouchableOpacity style={styles.resetButton} onPress={handleChangeCategory} activeOpacity={0.8}><ThemedText style={styles.resetButtonText}>Choose Another Category</ThemedText></TouchableOpacity>
-      </View>
-    </View>
-  );
-
   return (
-    <GestureHandlerRootView style={styles.container}>
-      <ThemedView style={[styles.screen, { paddingTop: insets.top, paddingBottom: insets.bottom || 16 }]}>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <ThemedView style={[styles.container, { paddingTop: insets.top + 8 }]}>
         <View style={styles.header}>
-          <View style={styles.headerLeft}><MaterialIcons name="auto-awesome" size={24} color="#0a7ea4" /><ThemedText style={styles.headerTitle} type="title">SwyftPix</ThemedText></View>
-          <ThemedText style={styles.headerSubtitle} lightColor="#687076" darkColor="#9BA1A6">Clean up your storage</ThemedText>
+          <View><ThemedText style={styles.headerTitle} type="title">SwyftPix</ThemedText><ThemedText style={styles.headerSubtitle} lightColor="#687076" darkColor="#9BA1A6">Clean up your storage</ThemedText></View>
         </View>
         <StorageSummary reviewableSize={reviewableSize} reviewableCount={reviewableCount} cleanedSize={spaceSaved} />
         {selectedCategory === null ? categorySelection : (
           <>
             <View style={styles.modeHeader}>
               <TouchableOpacity onPress={handleChangeCategory} style={styles.modeBackButton} activeOpacity={0.8}><MaterialIcons name="arrow-back" size={22} color="#0a7ea4" /></TouchableOpacity>
-              <View style={styles.modeTitleContainer}>
-                <ThemedText style={styles.modeTitle} type="defaultSemiBold">{CATEGORIES.find(c => c.id === selectedCategory)?.label}</ThemedText>
-                <ThemedText style={styles.modeSubtitle} lightColor="#687076" darkColor="#9BA1A6">Swipe to keep or trash</ThemedText>
-              </View>
+              <View style={styles.modeTitleContainer}><ThemedText style={styles.modeTitle} type="defaultSemiBold">{CATEGORIES.find(c => c.id === selectedCategory)?.label}</ThemedText><ThemedText style={styles.modeSubtitle} lightColor="#687076" darkColor="#9BA1A6">Swipe to keep or trash</ThemedText></View>
             </View>
             <View style={styles.cardContainer}>
-              {isFileCategory(selectedCategory) && Platform.OS !== 'android' ? fileAccessUnavailableCard
-              : isFileCategory(selectedCategory) && !hasFileAccess ? fileAccessCard
-              : hasPermission && hasMediaManagementAccess === false ? (
-                <View style={styles.emptyContainer}>
-                  <View style={[styles.emptyCard, isDark ? styles.emptyCardDark : styles.emptyCardLight]}>
-                    <View style={styles.emptyIconContainer}><MaterialIcons name="security" size={44} color="#0a7ea4" /></View>
-                    <ThemedText style={styles.emptyTitle}>Finish Setup</ThemedText>
-                    <ThemedText style={styles.emptyDescription} lightColor="#687076" darkColor="#9BA1A6">Give SwyftPix one-time Android media-management access. This prevents Android from showing another permission prompt every time you permanently delete an item.</ThemedText>
-                    <TouchableOpacity style={styles.resetButton} onPress={requestMediaManagementSetup} activeOpacity={0.8}><ThemedText style={styles.resetButtonText}>Open Android Settings</ThemedText></TouchableOpacity>
-                  </View>
-                </View>
-              ) : isLoadingDeviceMedia && items.length === 0 ? (
-                <ActivityIndicator size="large" color="#0a7ea4" />
-              ) : items.length > 0 ? (
+              {hasPermission && hasMediaManagementAccess === false ? (
+                <View style={styles.emptyContainer}><View style={[styles.emptyCard, isDark ? styles.emptyCardDark : styles.emptyCardLight]}><View style={styles.emptyIconContainer}><MaterialIcons name="security" size={44} color="#0a7ea4" /></View><ThemedText style={styles.emptyTitle}>Finish Setup</ThemedText><ThemedText style={styles.emptyDescription} lightColor="#687076" darkColor="#9BA1A6">Give SwyftPix one-time media-management access. This prevents Android from showing another permission prompt every time you permanently delete an item.</ThemedText><TouchableOpacity style={styles.resetButton} onPress={requestMediaManagementSetup} activeOpacity={0.8}><ThemedText style={styles.resetButtonText}>Open Android Settings</ThemedText></TouchableOpacity></View></View>
+              ) : isFileCategory(selectedCategory) && !hasFileAccess ? fileAccessCard : isLoadingDeviceMedia && items.length === 0 ? <ActivityIndicator size="large" color="#0a7ea4" /> : items.length > 0 ? (
                 <MediaReviewCard ref={cardRef} items={items.slice(0, 2)} onSwipeLeft={handleSwipeLeft} onSwipeRight={handleSwipeRight} onUndo={handleUndo} onReset={handleReset} isDark={isDark} />
               ) : (
-                <View style={styles.emptyContainer}>
-                  <View style={[styles.emptyCard, isDark ? styles.emptyCardDark : styles.emptyCardLight]}>
-                    <View style={styles.emptyIconContainer}><MaterialIcons name="check-circle" size={44} color="#0a7ea4" /></View>
-                    <ThemedText style={styles.emptyTitle}>You're all caught up</ThemedText>
-                    <ThemedText style={styles.emptyDescription} lightColor="#687076" darkColor="#9BA1A6">No more {CATEGORIES.find(c => c.id === selectedCategory)?.label.toLowerCase()} need review.</ThemedText>
-                    <TouchableOpacity style={styles.resetButton} onPress={handleChangeCategory} activeOpacity={0.8}><ThemedText style={styles.resetButtonText}>Choose Another Category</ThemedText></TouchableOpacity>
-                  </View>
-                </View>
+                <View style={styles.emptyContainer}><View style={[styles.emptyCard, isDark ? styles.emptyCardDark : styles.emptyCardLight]}><View style={styles.emptyIconContainer}><MaterialIcons name="check-circle" size={44} color="#0a7ea4" /></View><ThemedText style={styles.emptyTitle}>You're all caught up</ThemedText><ThemedText style={styles.emptyDescription} lightColor="#687076" darkColor="#9BA1A6">No more {CATEGORIES.find(c => c.id === selectedCategory)?.label.toLowerCase()} need review.</ThemedText><TouchableOpacity style={styles.resetButton} onPress={handleChangeCategory} activeOpacity={0.8}><ThemedText style={styles.resetButtonText}>Choose Another Category</ThemedText></TouchableOpacity></View></View>
               )}
             </View>
           </>
@@ -322,37 +273,17 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
-  screen: { flex: 1, paddingHorizontal: 16 },
-  header: { paddingTop: 8, paddingBottom: 8 },
-  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  headerTitle: { fontSize: 28 },
-  headerSubtitle: { fontSize: 13, marginTop: 2 },
-  categoryContainer: { flex: 1, minHeight: 0 },
-  categoryScroll: { flex: 1 },
-  categoryScrollContent: { paddingTop: 8, paddingBottom: 28 },
-  categoryHeading: { fontSize: 25, textAlign: 'center', marginBottom: 6 },
-  categorySubheading: { fontSize: 14, textAlign: 'center', marginBottom: 16 },
-  categoryGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: 10 },
-  categoryCard: { width: '48%', minHeight: 118, borderRadius: 18, paddingHorizontal: 12, paddingVertical: 12, justifyContent: 'center', alignItems: 'center', borderWidth: 1 },
-  categoryCardLight: { backgroundColor: '#fff', borderColor: '#e5e7eb' },
-  categoryCardDark: { backgroundColor: '#151718', borderColor: '#2b2f31' },
-  categoryIcon: { width: 54, height: 54, borderRadius: 17, alignItems: 'center', justifyContent: 'center', marginBottom: 7, backgroundColor: 'rgba(10,126,164,0.10)' },
-  categoryLabel: { fontSize: 16 },
-  categorySubtitle: { fontSize: 11, textAlign: 'center', marginTop: 3 },
-  modeHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
-  modeBackButton: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(10,126,164,0.10)', marginRight: 10 },
-  modeTitleContainer: { flex: 1 },
-  modeTitle: { fontSize: 19 },
-  modeSubtitle: { fontSize: 12, marginTop: 2 },
-  cardContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  emptyContainer: { width: '100%', alignItems: 'center' },
-  emptyCard: { width: '100%', maxWidth: 420, borderRadius: 20, padding: 24, alignItems: 'center', borderWidth: 1 },
-  emptyCardLight: { backgroundColor: '#fff', borderColor: '#e5e7eb' },
-  emptyCardDark: { backgroundColor: '#151718', borderColor: '#2b2f31' },
-  emptyIconContainer: { width: 72, height: 72, borderRadius: 36, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(10,126,164,0.10)', marginBottom: 14 },
-  emptyTitle: { fontSize: 20, marginBottom: 6 },
-  emptyDescription: { fontSize: 13, textAlign: 'center', lineHeight: 19, marginBottom: 18 },
-  resetButton: { paddingHorizontal: 18, paddingVertical: 11, borderRadius: 12, backgroundColor: '#0a7ea4' },
-  resetButtonText: { color: '#fff', fontSize: 13, fontWeight: '600' },
+  container: { flex: 1, paddingHorizontal: 16 },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
+  headerTitle: { fontSize: 32, fontWeight: '800' }, headerSubtitle: { fontSize: 14, marginTop: 2 },
+  categoryContainer: { flex: 1 }, categoryScroll: { flex: 1 }, categoryScrollContent: { paddingTop: 8, paddingBottom: 28 },
+  categoryHeading: { fontSize: 25, fontWeight: '800', marginTop: 8 }, categorySubheading: { fontSize: 14, marginTop: 4, marginBottom: 18 },
+  categoryGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: 12 },
+  categoryCard: { width: '48.5%', minHeight: 132, borderRadius: 20, padding: 16, justifyContent: 'center', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.1, shadowRadius: 5, elevation: 3 },
+  categoryCardLight: { backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E5E5EA' }, categoryCardDark: { backgroundColor: '#1C1C1E', borderWidth: 1, borderColor: '#2C2C2E' },
+  categoryIcon: { width: 54, height: 54, borderRadius: 16, backgroundColor: 'rgba(10,126,164,0.1)', justifyContent: 'center', alignItems: 'center', marginBottom: 10 },
+  categoryLabel: { fontSize: 16 }, categorySubtitle: { fontSize: 11, marginTop: 3 },
+  modeHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 }, modeBackButton: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(10,126,164,0.1)', justifyContent: 'center', alignItems: 'center', marginRight: 10 }, modeTitleContainer: { flex: 1 }, modeTitle: { fontSize: 20 }, modeSubtitle: { fontSize: 12, marginTop: 2 },
+  cardContainer: { flex: 1, minHeight: 0 },
+  emptyContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 18 }, emptyCard: { width: '100%', maxWidth: 420, borderRadius: 24, padding: 24, alignItems: 'center' }, emptyCardLight: { backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E5E5EA' }, emptyCardDark: { backgroundColor: '#1C1C1E', borderWidth: 1, borderColor: '#2C2C2E' }, emptyIconContainer: { width: 72, height: 72, borderRadius: 36, backgroundColor: 'rgba(10,126,164,0.1)', justifyContent: 'center', alignItems: 'center', marginBottom: 16 }, emptyTitle: { fontSize: 20, fontWeight: '800', textAlign: 'center' }, emptyDescription: { fontSize: 14, lineHeight: 21, textAlign: 'center', marginTop: 8 }, resetButton: { marginTop: 18, backgroundColor: '#0a7ea4', paddingHorizontal: 18, paddingVertical: 12, borderRadius: 14 }, resetButtonText: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
 });
