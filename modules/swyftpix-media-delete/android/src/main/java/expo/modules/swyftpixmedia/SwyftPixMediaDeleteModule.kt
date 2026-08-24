@@ -1,12 +1,14 @@
 package expo.modules.swyftpixmedia
 
 import android.app.Activity
-import android.content.ContentUris
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
 import android.provider.MediaStore
+import android.provider.Settings
 import android.util.Log
 import expo.modules.kotlin.Promise
 import expo.modules.kotlin.modules.Module
@@ -16,7 +18,11 @@ class SwyftPixMediaDeleteModule : Module() {
   companion object {
     private const val TAG = "SwyftPixMediaDelete"
     private const val DELETE_REQUEST_CODE = 47261
-    private val PROTECTED_PATH_PREFIXES = listOf("Android/", "Android/data/", "Android/obb/")
+    private val PROTECTED_PATH_PREFIXES = listOf(
+      "Android/",
+      "Android/data/",
+      "Android/obb/"
+    )
   }
 
   private var pendingPromise: Promise? = null
@@ -36,11 +42,39 @@ class SwyftPixMediaDeleteModule : Module() {
       if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return@Function false
       val activity = appContext.activityProvider?.currentActivity ?: return@Function false
       try {
-        val intent = android.content.Intent(android.provider.Settings.ACTION_REQUEST_MANAGE_MEDIA, Uri.parse("package:${context.packageName}"))
+        val intent = Intent(Settings.ACTION_REQUEST_MANAGE_MEDIA, Uri.parse("package:${context.packageName}"))
         activity.startActivity(intent)
         true
       } catch (error: Exception) {
         Log.e(TAG, "Could not open Media management settings", error)
+        false
+      }
+    }
+
+    /**
+     * Broad shared-storage access is the primary Android scanner permission for SwyftPix.
+     * Android exposes this as a special app access rather than a runtime permission dialog.
+     */
+    Function("hasAllFilesAccess") {
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        Environment.isExternalStorageManager()
+      } else {
+        true
+      }
+    }
+
+    Function("requestAllFilesAccess") {
+      if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return@Function true
+      val activity = appContext.activityProvider?.currentActivity ?: return@Function false
+      try {
+        val intent = Intent(
+          Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+          Uri.parse("package:${context.packageName}")
+        )
+        activity.startActivity(intent)
+        true
+      } catch (error: Exception) {
+        Log.e(TAG, "Could not open All Files Access settings", error)
         false
       }
     }
@@ -109,13 +143,22 @@ class SwyftPixMediaDeleteModule : Module() {
   }
 
   private fun isSafeSharedFile(relativePath: String, fileName: String): Boolean {
-    if (fileName.startsWith(".")) return false
-    if (relativePath.isBlank() || isProtectedRelativePath(relativePath)) return false
+    if (fileName.isBlank() || fileName.startsWith(".")) return false
+    val normalized = relativePath.replace('\\', '/').removePrefix("/")
+    if (normalized.contains("../") || normalized == "..") return false
+    if (isProtectedRelativePath(normalized)) return false
+    // Shared-storage files with no relative path are still valid user files.
+    // The protected Android tree is excluded above; app-private storage is not exposed by MediaStore.Files.
     return true
   }
 
   private fun listSharedFiles(category: String, limit: Int): List<Bundle> {
-    val collection = MediaStore.Files.getContentUri("external")
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && !Environment.isExternalStorageManager()) {
+      Log.d(TAG, "listSharedFiles skipped: All Files Access is not granted")
+      return emptyList()
+    }
+
+    val collection = MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
     val projection = arrayOf(
       MediaStore.Files.FileColumns._ID,
       MediaStore.Files.FileColumns.DISPLAY_NAME,
@@ -126,8 +169,15 @@ class SwyftPixMediaDeleteModule : Module() {
       MediaStore.Files.FileColumns.MEDIA_TYPE
     )
     val results = mutableListOf<Bundle>()
+    val seen = mutableSetOf<String>()
     try {
-      context.contentResolver.query(collection, projection, null, null, "${MediaStore.Files.FileColumns.DATE_MODIFIED} DESC")?.use { cursor ->
+      context.contentResolver.query(
+        collection,
+        projection,
+        null,
+        null,
+        "${MediaStore.Files.FileColumns.DATE_MODIFIED} DESC"
+      )?.use { cursor ->
         val idIndex = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns._ID)
         val nameIndex = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DISPLAY_NAME)
         val mimeIndex = cursor.getColumnIndex(MediaStore.Files.FileColumns.MIME_TYPE)
@@ -137,16 +187,33 @@ class SwyftPixMediaDeleteModule : Module() {
         val mediaTypeIndex = cursor.getColumnIndex(MediaStore.Files.FileColumns.MEDIA_TYPE)
 
         while (cursor.moveToNext() && results.size < limit) {
-          val mediaType = if (mediaTypeIndex >= 0) cursor.getInt(mediaTypeIndex) else MediaStore.Files.FileColumns.MEDIA_TYPE_NONE
+          val mediaType = if (mediaTypeIndex >= 0) {
+            cursor.getInt(mediaTypeIndex)
+          } else {
+            MediaStore.Files.FileColumns.MEDIA_TYPE_NONE
+          }
           if (mediaType != MediaStore.Files.FileColumns.MEDIA_TYPE_NONE) continue
+
           val name = cursor.getString(nameIndex) ?: continue
-          val relativePath = if (relativeIndex >= 0 && !cursor.isNull(relativeIndex)) cursor.getString(relativeIndex) else ""
+          val relativePath = if (relativeIndex >= 0 && !cursor.isNull(relativeIndex)) {
+            cursor.getString(relativeIndex)
+          } else {
+            ""
+          }
           if (!isSafeSharedFile(relativePath, name)) continue
-          val mimeType = if (mimeIndex >= 0 && !cursor.isNull(mimeIndex)) cursor.getString(mimeIndex) else "application/octet-stream"
+
+          val mimeType = if (mimeIndex >= 0 && !cursor.isNull(mimeIndex)) {
+            cursor.getString(mimeIndex)
+          } else {
+            "application/octet-stream"
+          }
           val fileCategory = classifyFile(name, mimeType)
           if (category != "all" && fileCategory != category) continue
+
           val id = cursor.getLong(idIndex)
-          val uri = ContentUris.withAppendedId(collection, id).toString()
+          val uri = MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY, id).toString()
+          if (!seen.add(uri)) continue
+
           val size = if (sizeIndex >= 0 && !cursor.isNull(sizeIndex)) cursor.getLong(sizeIndex) else 0L
           val modifiedSeconds = if (modifiedIndex >= 0 && !cursor.isNull(modifiedIndex)) cursor.getLong(modifiedIndex) else 0L
           results.add(Bundle().apply {
@@ -174,7 +241,13 @@ class SwyftPixMediaDeleteModule : Module() {
       "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "csv", "rtf", "odt", "ods", "odp", "epub" -> "document"
       "zip", "rar", "7z", "tar", "gz", "bz2", "xz", "tgz" -> "archive"
       "apk", "xapk", "apks", "aab" -> "apk"
-      else -> if (mimeType.startsWith("text/") || mimeType.contains("pdf") || mimeType.contains("document") || mimeType.contains("spreadsheet") || mimeType.contains("presentation")) "document" else "other"
+      else -> if (
+        mimeType.startsWith("text/") ||
+        mimeType.contains("pdf") ||
+        mimeType.contains("document") ||
+        mimeType.contains("spreadsheet") ||
+        mimeType.contains("presentation")
+      ) "document" else "other"
     }
   }
 
@@ -190,9 +263,19 @@ class SwyftPixMediaDeleteModule : Module() {
       findInCollection(resolver, MediaStore.Video.Media.EXTERNAL_CONTENT_URI, "videos", fileName, relativePath)?.let { return it }
       findInCollection(resolver, MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, "audio", fileName, relativePath)?.let { return it }
     }
-    val collection = MediaStore.Files.getContentUri("external")
+    val collection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+      MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+    } else {
+      MediaStore.Files.getContentUri("external")
+    }
     return try {
-      resolver.query(collection, arrayOf(MediaStore.Files.FileColumns._ID, MediaStore.Files.FileColumns.DISPLAY_NAME, MediaStore.Files.FileColumns.RELATIVE_PATH), "${MediaStore.Files.FileColumns.DISPLAY_NAME} = ? AND ${MediaStore.Files.FileColumns.RELATIVE_PATH} = ?", arrayOf(fileName, relativePath), null)?.use { cursor ->
+      resolver.query(
+        collection,
+        arrayOf(MediaStore.Files.FileColumns._ID, MediaStore.Files.FileColumns.DISPLAY_NAME, MediaStore.Files.FileColumns.RELATIVE_PATH),
+        "${MediaStore.Files.FileColumns.DISPLAY_NAME} = ? AND ${MediaStore.Files.FileColumns.RELATIVE_PATH} = ?",
+        arrayOf(fileName, relativePath),
+        null
+      )?.use { cursor ->
         if (!cursor.moveToFirst()) return@use null
         val name = cursor.getString(cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DISPLAY_NAME))
         val storedRelativePath = cursor.getString(cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.RELATIVE_PATH))
@@ -209,12 +292,18 @@ class SwyftPixMediaDeleteModule : Module() {
     if (uri.scheme != "content" || uri.authority != "media") return null
     val resolver = context.contentResolver
     return try {
-      resolver.query(uri, arrayOf(MediaStore.Files.FileColumns.DISPLAY_NAME, MediaStore.Files.FileColumns.RELATIVE_PATH, MediaStore.Files.FileColumns.MEDIA_TYPE), null, null, null)?.use { cursor ->
+      resolver.query(
+        uri,
+        arrayOf(MediaStore.Files.FileColumns.DISPLAY_NAME, MediaStore.Files.FileColumns.RELATIVE_PATH, MediaStore.Files.FileColumns.MEDIA_TYPE),
+        null,
+        null,
+        null
+      )?.use { cursor ->
         if (!cursor.moveToFirst()) return@use null
         val name = cursor.getString(cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DISPLAY_NAME))
         val relativePath = cursor.getString(cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.RELATIVE_PATH))
         val mediaType = cursor.getInt(cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.MEDIA_TYPE))
-        if (mediaType == MediaStore.Files.FileColumns.MEDIA_TYPE_NONE && !isSafeSharedFile(relativePath, name)) return@use null
+        if (!isSafeSharedFile(relativePath, name)) return@use null
         if (mediaType != MediaStore.Files.FileColumns.MEDIA_TYPE_NONE && isProtectedRelativePath(relativePath)) return@use null
         uri
       }
@@ -224,9 +313,21 @@ class SwyftPixMediaDeleteModule : Module() {
     }
   }
 
-  private fun findInCollection(resolver: android.content.ContentResolver, collection: Uri, label: String, fileName: String, relativePath: String): Uri? {
+  private fun findInCollection(
+    resolver: android.content.ContentResolver,
+    collection: Uri,
+    label: String,
+    fileName: String,
+    relativePath: String
+  ): Uri? {
     return try {
-      resolver.query(collection, arrayOf(MediaStore.MediaColumns._ID, MediaStore.MediaColumns.DISPLAY_NAME, MediaStore.MediaColumns.RELATIVE_PATH), "${MediaStore.MediaColumns.DISPLAY_NAME} = ? AND ${MediaStore.MediaColumns.RELATIVE_PATH} = ?", arrayOf(fileName, relativePath), null)?.use { cursor ->
+      resolver.query(
+        collection,
+        arrayOf(MediaStore.MediaColumns._ID, MediaStore.MediaColumns.DISPLAY_NAME, MediaStore.MediaColumns.RELATIVE_PATH),
+        "${MediaStore.MediaColumns.DISPLAY_NAME} = ? AND ${MediaStore.MediaColumns.RELATIVE_PATH} = ?",
+        arrayOf(fileName, relativePath),
+        null
+      )?.use { cursor ->
         if (!cursor.moveToFirst()) null else ContentUris.withAppendedId(collection, cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)))
       }
     } catch (error: Exception) {
