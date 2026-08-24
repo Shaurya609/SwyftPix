@@ -18,13 +18,13 @@ import { canManageMedia, requestMediaManagementAccess } from '@/modules/swyftpix
 import { initialize, trashAsset, restoreAsset, keepAsset, undoKeep, getReviewedAssetIds, getTrashedAssets } from '@/utils/trash-service';
 
 interface SwipeHistory { item: MockMediaItem; direction: 'left' | 'right'; }
-type HomeCategory = 'all' | 'photo' | 'video' | 'audio';
+type HomeCategory = 'photo' | 'video' | 'audio' | 'all';
 
 const CATEGORIES: Array<{ id: HomeCategory; label: string; subtitle: string; icon: string }> = [
-  { id: 'all', label: 'All Media', subtitle: 'Photos, videos & audio', icon: 'collections' },
   { id: 'photo', label: 'Photos', subtitle: 'Images & screenshots', icon: 'photo-library' },
   { id: 'video', label: 'Videos', subtitle: 'Clips & recordings', icon: 'videocam' },
   { id: 'audio', label: 'Audio', subtitle: 'Music & recordings', icon: 'audiotrack' },
+  { id: 'all', label: 'All Media', subtitle: 'Photos, videos & audio', icon: 'collections' },
 ];
 
 function matchesCategory(item: MockMediaItem, category: HomeCategory): boolean {
@@ -46,6 +46,7 @@ export default function HomeScreen() {
   const [endCursor, setEndCursor] = useState<string | undefined>(undefined);
   const [hasNextPage, setHasNextPage] = useState(false);
   const [isLoadingDeviceMedia, setIsLoadingDeviceMedia] = useState(false);
+  const firstPageCache = useRef<Awaited<ReturnType<typeof fetchDeviceMediaPage>> | null>(null);
 
   const refreshMediaManagementAccess = useCallback(() => {
     if (Platform.OS !== 'android' || Platform.Version < 31) {
@@ -82,7 +83,11 @@ export default function HomeScreen() {
         setHasNextPage(false);
         return;
       }
-      const result = await fetchDeviceMediaPage(20);
+
+      const cached = firstPageCache.current;
+      const result = cached ?? await fetchDeviceMediaPage(40);
+      if (!cached) firstPageCache.current = result;
+
       setItems(filterItems(result.items, category, reviewedIds));
       setEndCursor(result.endCursor);
       setHasNextPage(result.hasNextPage);
@@ -101,14 +106,26 @@ export default function HomeScreen() {
         setDeletedItems(await getTrashedAssets());
         const granted = await checkAndRequestPermissions();
         setHasPermission(granted);
-        if (!granted) setHasMediaManagementAccess(true);
-        else refreshMediaManagementAccess();
+        if (!granted) {
+          setHasMediaManagementAccess(true);
+        } else {
+          refreshMediaManagementAccess();
+          // Prefetch the first media page while the user is choosing a category.
+          // This keeps category entry responsive without blocking the home screen.
+          fetchDeviceMediaPage(40)
+            .then(result => { firstPageCache.current = result; })
+            .catch(err => console.error('[HomeScreen] Error prefetching device media:', err));
+        }
       } catch (err) {
         console.error('[HomeScreen] Error initializing persistent review state:', err);
         const granted = await checkAndRequestPermissions();
         setHasPermission(granted);
-        if (granted) refreshMediaManagementAccess();
-        else setHasMediaManagementAccess(true);
+        if (granted) {
+          refreshMediaManagementAccess();
+          fetchDeviceMediaPage(40)
+            .then(result => { firstPageCache.current = result; })
+            .catch(prefetchErr => console.error('[HomeScreen] Error prefetching device media:', prefetchErr));
+        } else setHasMediaManagementAccess(true);
       }
     }
     init();
@@ -242,9 +259,7 @@ export default function HomeScreen() {
         {selectedCategory === null ? categorySelection : (
           <>
             <View style={styles.modeHeader}>
-              <TouchableOpacity onPress={handleChangeCategory} style={styles.modeBackButton} activeOpacity={0.8}>
-                <MaterialIcons name="arrow-back" size={22} color="#0a7ea4" />
-              </TouchableOpacity>
+              <TouchableOpacity onPress={handleChangeCategory} style={styles.modeBackButton} activeOpacity={0.8}><MaterialIcons name="arrow-back" size={22} color="#0a7ea4" /></TouchableOpacity>
               <View style={styles.modeTitleContainer}>
                 <ThemedText style={styles.modeTitle} type="defaultSemiBold">{CATEGORIES.find(c => c.id === selectedCategory)?.label}</ThemedText>
                 <ThemedText style={styles.modeSubtitle} lightColor="#687076" darkColor="#9BA1A6">Swipe to keep or trash</ThemedText>
