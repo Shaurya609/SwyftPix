@@ -43,7 +43,7 @@ class SwyftPixFileAccessModule : Module() {
       launchPicker(Intent.ACTION_OPEN_DOCUMENT, REQUEST_PICK_FILES, promise)
     }
 
-    Function("listFiles") { category: String, limit: Int ->
+    AsyncFunction("listFiles") { category: String, limit: Int ->
       listFiles(category, limit.coerceIn(1, DEFAULT_LIMIT))
     }
 
@@ -148,7 +148,14 @@ class SwyftPixFileAccessModule : Module() {
 
   private fun isStoredUri(uri: Uri): Boolean {
     return storedUris().any { stored ->
-      stored.toString() == uri.toString() || (DocumentsContract.isTreeUri(stored) && stored.authority == uri.authority)
+      if (stored.toString() == uri.toString()) return@any true
+      if (!DocumentsContract.isTreeUri(stored) || stored.authority != uri.authority) return@any false
+      try {
+        val root = DocumentsContract.buildDocumentUriUsingTree(stored, DocumentsContract.getTreeDocumentId(stored))
+        root == uri || DocumentsContract.isChildDocument(context.contentResolver, root, uri)
+      } catch (_: Exception) {
+        false
+      }
     }
   }
 
@@ -247,7 +254,7 @@ class SwyftPixFileAccessModule : Module() {
             putString("mimeType", mime)
             putLong("fileSize", if (sizeIndex >= 0 && !cursor.isNull(sizeIndex)) cursor.getLong(sizeIndex).coerceAtLeast(0L) else 0L)
             putLong("dateModified", if (modifiedIndex >= 0 && !cursor.isNull(modifiedIndex)) cursor.getLong(modifiedIndex).coerceAtLeast(0L) else 0L)
-            putString("relativePath", "SAF")
+            putString("relativePath", relativePathFor(documentId))
             putString("uri", key)
             putBoolean("canDelete", flagsIndex < 0 || (cursor.getInt(flagsIndex) and DocumentsContract.Document.FLAG_SUPPORTS_DELETE) != 0)
           })
@@ -261,6 +268,7 @@ class SwyftPixFileAccessModule : Module() {
   private fun querySingleDocument(uri: Uri, category: String): Bundle? {
     if (!isSafeDocumentUri(uri)) return null
     val projection = arrayOf(
+      DocumentsContract.Document.COLUMN_DOCUMENT_ID,
       DocumentsContract.Document.COLUMN_DISPLAY_NAME,
       DocumentsContract.Document.COLUMN_MIME_TYPE,
       DocumentsContract.Document.COLUMN_SIZE,
@@ -270,6 +278,7 @@ class SwyftPixFileAccessModule : Module() {
     return try {
       context.contentResolver.query(uri, projection, null, null, null)?.use { cursor ->
         if (!cursor.moveToFirst()) return@use null
+        val documentId = cursor.getString(cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DOCUMENT_ID)) ?: return@use null
         val name = cursor.getString(cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DISPLAY_NAME)) ?: return@use null
         val mime = cursor.getString(cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_MIME_TYPE)) ?: "application/octet-stream"
         if (mime == DocumentsContract.Document.MIME_TYPE_DIR || name.startsWith(".")) return@use null
@@ -285,7 +294,7 @@ class SwyftPixFileAccessModule : Module() {
           putString("mimeType", mime)
           putLong("fileSize", if (sizeIndex >= 0 && !cursor.isNull(sizeIndex)) cursor.getLong(sizeIndex).coerceAtLeast(0L) else 0L)
           putLong("dateModified", if (modifiedIndex >= 0 && !cursor.isNull(modifiedIndex)) cursor.getLong(modifiedIndex).coerceAtLeast(0L) else 0L)
-          putString("relativePath", "SAF")
+          putString("relativePath", relativePathFor(documentId))
           putString("uri", uri.toString())
           putBoolean("canDelete", flagsIndex < 0 || (cursor.getInt(flagsIndex) and DocumentsContract.Document.FLAG_SUPPORTS_DELETE) != 0)
         }
@@ -294,6 +303,13 @@ class SwyftPixFileAccessModule : Module() {
       Log.w(TAG, "SAF document query failed for $uri", error)
       null
     }
+  }
+
+  private fun relativePathFor(documentId: String): String {
+    val path = documentId.substringAfter(':', documentId).replace('\\', '/').trim('/')
+    if (path.isBlank() || !documentId.contains(':')) return "SAF"
+    val slash = path.lastIndexOf('/')
+    return if (slash < 0) path else path.substring(0, slash + 1)
   }
 
   private fun classifyFile(fileName: String, mimeType: String): String {
