@@ -3,8 +3,8 @@ import * as MediaLibrary from 'expo-media-library';
 import { MockMediaItem, TrashedAsset } from '@/types/media';
 import { deleteMediaByPath } from '@/modules/swyftpix-media-delete';
 
-// Negative values are developer test intervals in seconds. 0 means never.
-export const RETENTION_OPTIONS = [-5, 7, 30, 60, 90, 0] as const;
+// Retention is a global Trash policy. 0 means never auto-delete.
+export const RETENTION_OPTIONS = [1, 7, 30, 60, 90, 0] as const;
 export type RetentionDays = (typeof RETENTION_OPTIONS)[number];
 export const DEFAULT_RETENTION_DAYS: RetentionDays = 30;
 
@@ -38,9 +38,7 @@ async function getDb(): Promise<SQLite.SQLiteDatabase> {
 
 function calculateExpiresAt(deletedAt: string, retention: RetentionDays): string | null {
   if (retention === 0) return null;
-  const durationMs = retention < 0
-    ? Math.abs(retention) * 1000
-    : retention * 24 * 60 * 60 * 1000;
+  const durationMs = retention * 24 * 60 * 60 * 1000;
   return new Date(new Date(deletedAt).getTime() + durationMs).toISOString();
 }
 
@@ -83,13 +81,14 @@ export async function initialize(): Promise<void> {
         `);
       });
     }
+
+    // expires_at is derived data. Recalculate it for every existing Trash item
+    // from its original deleted_at timestamp using the current global policy.
     const retention = await readRetentionDays(db);
-    if (retention !== 0) {
-      const rows = await db.getAllAsync<{ id: string; deleted_at: string }>(`SELECT id, deleted_at FROM trashed_media WHERE expires_at IS NULL;`);
-      for (const row of rows) {
-        const expiresAt = calculateExpiresAt(row.deleted_at, retention);
-        if (expiresAt) await db.runAsync(`UPDATE trashed_media SET expires_at = ? WHERE id = ?;`, [expiresAt, row.id]);
-      }
+    const rows = await db.getAllAsync<{ id: string; deleted_at: string }>(`SELECT id, deleted_at FROM trashed_media;`);
+    for (const row of rows) {
+      const expiresAt = calculateExpiresAt(row.deleted_at, retention);
+      await db.runAsync(`UPDATE trashed_media SET expires_at = ? WHERE id = ?;`, [expiresAt, row.id]);
     }
   })();
   try { await initializationPromise; } finally { initializationPromise = null; }
