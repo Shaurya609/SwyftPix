@@ -28,9 +28,6 @@ export function AudioPreview({ uri }: AudioPreviewProps) {
     ? Math.min(1, Math.max(0, status.currentTime / status.duration))
     : 0;
 
-  const currentTime = formatTime(status.currentTime);
-  const totalTime = formatTime(status.duration);
-
   return (
     <View style={styles.container}>
       <TouchableOpacity
@@ -53,16 +50,10 @@ export function AudioPreview({ uri }: AudioPreviewProps) {
           <View style={[styles.progress, { width: `${progress * 100}%` }]} />
         </View>
         <View style={styles.timeRow}>
-          <Text style={styles.timeText}>{currentTime}</Text>
-          <Text style={styles.timeText}>{totalTime}</Text>
+          <Text style={styles.timeText}>{formatTime(status.currentTime)}</Text>
+          <Text style={styles.timeText}>{formatTime(status.duration)}</Text>
         </View>
       </View>
-
-      {status.error ? (
-        <Text style={styles.errorText} numberOfLines={1}>
-          Unable to play this audio file
-        </Text>
-      ) : null}
     </View>
   );
 }
@@ -116,12 +107,6 @@ const styles = StyleSheet.create({
   },
   timeText: {
     color: '#8E8E93',
-    fontSize: 11,
-    fontWeight: '600',
-  },
-  errorText: {
-    marginTop: 10,
-    color: '#FF3B30',
     fontSize: 11,
     fontWeight: '600',
   },
