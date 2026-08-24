@@ -33,27 +33,51 @@ async function getAlbumMap(): Promise<Map<string, string>> {
   return map;
 }
 
-function determineSource(asset: MediaLibrary.Asset, albumTitle?: string): MockMediaItem['source'] {
-  const isVideo = asset.mediaType === 'video';
-  const isAudio = asset.mediaType === 'audio';
-  if (albumTitle) {
-    const name = albumTitle.toLowerCase();
-    if (name.includes('screenshot')) return 'Screenshots';
-    if (name.includes('whatsapp')) return 'WhatsApp';
-    if (name.includes('download')) return 'Downloads';
-    if (name.includes('music') || name.includes('audio') || name.includes('podcast')) return 'Music';
-    if (name.includes('archive')) return 'Archives';
-    if (name.includes('apk')) return 'APKs';
-    if (name.includes('camera') || name.includes('dcim') || name.includes('camera roll') || name.includes('recents')) return isVideo ? 'Videos' : 'Camera';
-    if (name.includes('video')) return 'Videos';
+/**
+ * Centralized source classification for every media provider.
+ * Safety filtering happens natively before shared files reach this function.
+ * WhatsApp is intentionally checked before generic folder/category rules so
+ * WhatsApp documents, archives and APKs retain their real source label.
+ */
+export function determineSource({
+  fileName = '',
+  uri = '',
+  albumTitle = '',
+  relativePath = '',
+  mediaType,
+  category,
+}: {
+  fileName?: string;
+  uri?: string;
+  albumTitle?: string;
+  relativePath?: string;
+  mediaType?: MediaLibrary.MediaTypeValue;
+  category?: string;
+}): MockMediaItem['source'] {
+  const filename = fileName.toLowerCase();
+  const path = `${relativePath} ${uri}`.toLowerCase();
+  const album = albumTitle.toLowerCase();
+  const isVideo = mediaType === MediaLibrary.MediaType.video || category === 'video';
+  const isAudio = mediaType === MediaLibrary.MediaType.audio || category === 'audio';
+
+  const whatsappSignals = [filename, path, album];
+  if (whatsappSignals.some(value => value.includes('whatsapp'))) return 'WhatsApp';
+
+  if (album.includes('screenshot') || filename.includes('screenshot') || path.includes('screenshot')) return 'Screenshots';
+  if (album.includes('download') || filename.includes('download') || path.includes('download')) return 'Downloads';
+  if (album.includes('music') || album.includes('audio') || album.includes('podcast') || path.includes('/music/') || path.includes('/audio/')) return 'Music';
+  if (album.includes('archive') || path.includes('/archive/')) return 'Archives';
+  if (album.includes('apk') || path.includes('/apk/')) return 'APKs';
+  if (album.includes('document') || path.includes('/document/') || category === 'document') return 'Documents';
+  if (album.includes('camera') || album.includes('dcim') || album.includes('camera roll') || album.includes('recents') || path.includes('/dcim/camera/')) {
+    return isVideo ? 'Videos' : 'Camera';
   }
-  const filename = (asset.filename || '').toLowerCase();
-  const uri = (asset.uri || '').toLowerCase();
-  if (filename.includes('screenshot') || uri.includes('screenshot')) return 'Screenshots';
-  if (filename.includes('whatsapp') || uri.includes('whatsapp')) return 'WhatsApp';
-  if (filename.includes('download') || uri.includes('download')) return 'Downloads';
+  if (album.includes('video') || path.includes('/video/')) return 'Videos';
+  if (category === 'archive') return 'Archives';
+  if (category === 'apk') return 'APKs';
   if (isAudio) return 'Music';
-  return isVideo ? 'Videos' : 'Camera';
+  if (isVideo) return 'Videos';
+  return 'Camera';
 }
 
 function formatDuration(seconds: number): string {
@@ -91,18 +115,6 @@ function nativeFileCategory(category: DeviceMediaCategory): NativeFileCategory {
   return category === 'document' || category === 'archive' || category === 'apk' || category === 'other' ? category : 'all';
 }
 
-function sourceForSharedFile(relativePath: string, category: string): MockMediaItem['source'] {
-  const path = relativePath.toLowerCase();
-  if (category === 'apk') return 'APKs';
-  if (category === 'archive') return 'Archives';
-  if (path.includes('/download')) return 'Downloads';
-  if (path.includes('/document')) return 'Documents';
-  if (path.includes('/music') || path.includes('/audio')) return 'Music';
-  if (path.includes('/video')) return 'Videos';
-  if (path.includes('/whatsapp')) return 'WhatsApp';
-  return 'Other';
-}
-
 function mapSharedFiles(category: DeviceMediaCategory): MockMediaItem[] {
   return listSharedFiles(nativeFileCategory(category), 40).map(file => ({
     id: file.id,
@@ -111,7 +123,12 @@ function mapSharedFiles(category: DeviceMediaCategory): MockMediaItem[] {
     category: file.fileType as MockMediaItem['category'],
     fileSize: file.fileSize,
     dateCreated: new Date(file.dateModified > 0 ? file.dateModified * 1000 : Date.now()).toISOString(),
-    source: sourceForSharedFile(file.relativePath, file.fileType),
+    source: determineSource({
+      fileName: file.fileName,
+      uri: file.uri,
+      relativePath: file.relativePath,
+      category: file.fileType,
+    }),
     uri: file.uri,
     mimeType: file.mimeType,
     thumbnailColor: file.fileType === 'document' ? '#8ab4f8' : file.fileType === 'archive' ? '#f9c74f' : file.fileType === 'apk' ? '#81c784' : '#b0bec5',
@@ -137,7 +154,12 @@ export async function fetchDeviceMediaPage(limit: number, afterAssetId?: string,
       const finalSize = await fetchAssetSize(asset.uri);
       const dateCreatedStr = asset.creationTime ? new Date(asset.creationTime).toISOString() : new Date().toISOString();
       const albumTitle = asset.albumId ? albumMap.get(asset.albumId) : undefined;
-      const source = determineSource(asset, albumTitle);
+      const source = determineSource({
+        fileName: asset.filename || '',
+        uri: asset.uri,
+        albumTitle,
+        mediaType: asset.mediaType,
+      });
       const isVideo = asset.mediaType === 'video';
       const isAudio = asset.mediaType === 'audio';
       let fileType: MediaType;
