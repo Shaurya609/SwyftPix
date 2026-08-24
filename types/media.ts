@@ -27,7 +27,7 @@ export interface SwyftPixAsset {
   id: string;
   fileName: string;
   fileType: MediaType;
-  category: MediaCategory;
+  category?: MediaCategory;
   fileSize: number; // in bytes
   dateCreated: string; // ISO date format
   source: 'Camera' | 'Screenshots' | 'WhatsApp' | 'Downloads' | 'Documents' | 'Videos' | 'Music' | 'Archives' | 'APKs' | 'Other';
