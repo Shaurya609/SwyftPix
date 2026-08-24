@@ -1,5 +1,5 @@
 import React, { useState, useRef, useMemo, useEffect, useCallback } from 'react';
-import { StyleSheet, View, Text, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { StyleSheet, View, Text, TouchableOpacity, ActivityIndicator, Alert, Platform } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from 'expo-router';
@@ -14,6 +14,7 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 import { formatFileSize } from '@/utils/formatters';
 import { MockMediaItem } from '@/types/media';
 import { checkAndRequestPermissions, fetchDeviceMediaPage } from '@/utils/device-media';
+import { canManageMedia, requestMediaManagementAccess } from '@/modules/swyftpix-media-delete';
 import {
   initialize,
   trashAsset,
@@ -44,9 +45,53 @@ export default function HomeScreen() {
 
   // Permission and pagination states
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
+  const [hasMediaManagementAccess, setHasMediaManagementAccess] = useState<boolean | null>(null);
   const [endCursor, setEndCursor] = useState<string | undefined>(undefined);
   const [hasNextPage, setHasNextPage] = useState<boolean>(false);
   const [isLoadingDeviceMedia, setIsLoadingDeviceMedia] = useState<boolean>(false);
+
+  const refreshMediaManagementAccess = useCallback(() => {
+    if (Platform.OS !== 'android' || Platform.Version < 31) {
+      setHasMediaManagementAccess(true);
+      return true;
+    }
+
+    const granted = canManageMedia();
+    setHasMediaManagementAccess(granted);
+    return granted;
+  }, []);
+
+  const requestMediaManagementSetup = useCallback(() => {
+    if (Platform.OS !== 'android' || Platform.Version < 31) {
+      return true;
+    }
+
+    if (canManageMedia()) {
+      setHasMediaManagementAccess(true);
+      return true;
+    }
+
+    Alert.alert(
+      'Allow media management',
+      'SwyftPix needs one-time Android media-management access so it can permanently delete items from Trash without asking you for permission every time.',
+      [
+        {
+          text: 'Not now',
+          style: 'cancel',
+          onPress: () => setHasMediaManagementAccess(false),
+        },
+        {
+          text: 'Open Settings',
+          onPress: () => {
+            const opened = requestMediaManagementAccess();
+            if (!opened) setHasMediaManagementAccess(false);
+          },
+        },
+      ]
+    );
+
+    return false;
+  }, []);
 
   // Initial permission check and media fetch on mount
   useEffect(() => {
@@ -59,39 +104,54 @@ export default function HomeScreen() {
         const granted = await checkAndRequestPermissions();
         setHasPermission(granted);
 
+        if (!granted) {
+          setHasMediaManagementAccess(true);
+          const reviewedIds = await getReviewedAssetIds();
+          setItems(MOCK_MEDIA_ITEMS.filter(item => !reviewedIds.has(item.id)));
+          return;
+        }
+
+        const managementGranted = refreshMediaManagementAccess();
+        if (!managementGranted) {
+          setItems([]);
+          return;
+        }
+
         const reviewedIds = await getReviewedAssetIds();
 
-        if (granted) {
-          setIsLoadingDeviceMedia(true);
-          try {
-            const result = await fetchDeviceMediaPage(20);
-            const reviewableItems = result.items.filter(item => !reviewedIds.has(item.id));
-            setItems(reviewableItems);
-            setEndCursor(result.endCursor);
-            setHasNextPage(result.hasNextPage);
-          } catch (err) {
-            console.error('[HomeScreen] Error loading initial device media:', err);
-            setItems([]);
-          } finally {
-            setIsLoadingDeviceMedia(false);
-          }
-        } else {
-          // Fallback to mock media when permission is denied or unavailable
-          setItems(MOCK_MEDIA_ITEMS.filter(item => !reviewedIds.has(item.id)));
+        setIsLoadingDeviceMedia(true);
+        try {
+          const result = await fetchDeviceMediaPage(20);
+          const reviewableItems = result.items.filter(item => !reviewedIds.has(item.id));
+          setItems(reviewableItems);
+          setEndCursor(result.endCursor);
+          setHasNextPage(result.hasNextPage);
+        } catch (err) {
+          console.error('[HomeScreen] Error loading initial device media:', err);
+          setItems([]);
+        } finally {
+          setIsLoadingDeviceMedia(false);
         }
       } catch (err) {
         console.error('[HomeScreen] Error initializing persistent review state:', err);
         const granted = await checkAndRequestPermissions();
         setHasPermission(granted);
-        setItems(granted ? [] : MOCK_MEDIA_ITEMS);
+        if (granted) {
+          refreshMediaManagementAccess();
+          setItems([]);
+        } else {
+          setHasMediaManagementAccess(true);
+          setItems(MOCK_MEDIA_ITEMS);
+        }
       }
     }
 
     init();
-  }, []);
+  }, [refreshMediaManagementAccess]);
 
   // Refresh persisted review state whenever the Home tab regains focus.
-  // This makes items restored from Trash immediately eligible on Home.
+  // Also re-check Android's special media-management access after returning
+  // from Settings.
   useFocusEffect(
     useCallback(() => {
       if (hasPermission === null) return;
@@ -100,6 +160,13 @@ export default function HomeScreen() {
 
       async function refreshAfterFocus() {
         try {
+          const managementGranted = refreshMediaManagementAccess();
+
+          if (!managementGranted && hasPermission) {
+            setItems([]);
+            return;
+          }
+
           await initialize();
           const reviewedIds = await getReviewedAssetIds();
           const persistedTrash = await getTrashedAssets();
@@ -128,7 +195,7 @@ export default function HomeScreen() {
       return () => {
         cancelled = true;
       };
-    }, [hasPermission])
+    }, [hasPermission, refreshMediaManagementAccess])
   );
 
   // Fetch the next page of device media when the user review stack runs low
@@ -297,7 +364,26 @@ export default function HomeScreen() {
         <StorageSummary reviewableSize={reviewableSize} reviewableCount={reviewableCount} cleanedSize={spaceSaved} />
 
         <View style={styles.cardContainer}>
-          {isLoadingDeviceMedia && items.length === 0 ? (
+          {hasPermission && hasMediaManagementAccess === false ? (
+            <View style={styles.emptyContainer}>
+              <View style={[styles.emptyCard, isDark ? styles.emptyCardDark : styles.emptyCardLight]}>
+                <View style={styles.emptyIconContainer}>
+                  <MaterialIcons name="security" size={44} color="#0a7ea4" />
+                </View>
+                <ThemedText style={styles.emptyTitle}>Finish Setup</ThemedText>
+                <ThemedText style={styles.emptyDescription} lightColor="#687076" darkColor="#9BA1A6">
+                  Give SwyftPix one-time media-management access. This prevents Android from showing another permission prompt every time you permanently delete an item.
+                </ThemedText>
+                <TouchableOpacity
+                  style={styles.resetButton}
+                  onPress={requestMediaManagementSetup}
+                  activeOpacity={0.8}
+                >
+                  <ThemedText style={styles.resetButtonText}>Open Android Settings</ThemedText>
+                </TouchableOpacity>
+              </View>
+            </View>
+          ) : isLoadingDeviceMedia && items.length === 0 ? (
             <ActivityIndicator size="large" color="#0a7ea4" />
           ) : items.length > 0 ? (
             items.slice(0, 2).reverse().map((item, index) => {

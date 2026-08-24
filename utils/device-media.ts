@@ -141,11 +141,6 @@ export async function fetchDeviceMediaPage(
   afterAssetId?: string
 ): Promise<FetchPageResult> {
   try {
-    const hasPermission = await checkAndRequestPermissions();
-    if (!hasPermission) {
-      throw new Error('Permission to access media library was denied.');
-    }
-
     // 1. Get album mapping cache
     const albumMap = await getAlbumMap();
 

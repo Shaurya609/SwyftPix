@@ -25,6 +25,36 @@ class SwyftPixMediaDeleteModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("SwyftPixMediaDelete")
 
+      Function("canManageMedia") {
+      if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+        return@Function false
+      }
+
+      MediaStore.canManageMedia(context)
+    }
+
+    Function("requestMediaManagementAccess") {
+      if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+        return@Function false
+      }
+
+      val activity = appContext.activityProvider?.currentActivity
+        ?: return@Function false
+
+      try {
+        val intent = android.content.Intent(
+          android.provider.Settings.ACTION_REQUEST_MANAGE_MEDIA,
+          Uri.parse("package:${context.packageName}")
+        )
+
+        activity.startActivity(intent)
+        true
+      } catch (error: Exception) {
+        Log.e(TAG, "Could not open Media management settings", error)
+        false
+      }
+    }
+
     AsyncFunction("deleteMediaByPath") { path: String, promise: Promise ->
       if (pendingPromise != null) {
         promise.reject("E_DELETE_BUSY", "Another media deletion is awaiting Android authorization.", null)

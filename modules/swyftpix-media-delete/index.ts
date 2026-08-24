@@ -3,8 +3,23 @@ import { requireNativeModule } from 'expo-modules-core';
 
 type NativeMediaDeleteModule = {
   deleteMediaByPath(path: string): Promise<boolean>;
+  canManageMedia(): boolean;
+  requestMediaManagementAccess(): boolean;
 };
 
+export function canManageMedia(): boolean {
+  const nativeModule = getNativeMediaDelete();
+  if (!nativeModule) return false;
+
+  return nativeModule.canManageMedia();
+}
+
+export function requestMediaManagementAccess(): boolean {
+  const nativeModule = getNativeMediaDelete();
+  if (!nativeModule) return false;
+
+  return nativeModule.requestMediaManagementAccess();
+}
 /**
  * Load the native module lazily. This is important because Expo Go does not
  * contain SwyftPix's custom native module. Eagerly calling requireNativeModule
