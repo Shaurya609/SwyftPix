@@ -2,6 +2,7 @@ import * as MediaLibrary from 'expo-media-library';
 import { File } from 'expo-file-system';
 import { MockMediaItem, MediaType } from '../types/media';
 import { listSharedFiles } from '../modules/swyftpix-media-delete';
+import { listUserFiles } from './file-access';
 
 let albumCache: Map<string, string> | null = null;
 
@@ -116,7 +117,14 @@ function nativeFileCategory(category: DeviceMediaCategory): NativeFileCategory {
 }
 
 function mapSharedFiles(category: DeviceMediaCategory): MockMediaItem[] {
-  return listSharedFiles(nativeFileCategory(category), 40).map(file => ({
+  const nativeCategory = nativeFileCategory(category);
+  const nativeFiles = [...listSharedFiles(nativeCategory, 40), ...listUserFiles(nativeCategory, 80)];
+  const seen = new Set<string>();
+  return nativeFiles.filter(file => {
+    if (seen.has(file.uri)) return false;
+    seen.add(file.uri);
+    return true;
+  }).map(file => ({
     id: file.id,
     fileName: file.fileName,
     fileType: file.fileType as MockMediaItem['fileType'],
