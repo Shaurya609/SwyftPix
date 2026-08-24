@@ -16,6 +16,8 @@ type NativeMediaDeleteModule = {
   deleteMediaByPath(path: string): Promise<boolean>;
   canManageMedia(): boolean;
   requestMediaManagementAccess(): boolean;
+  hasAllFilesAccess(): boolean;
+  requestAllFilesAccess(): boolean;
   listSharedFiles(category: 'document' | 'archive' | 'apk' | 'other' | 'all', limit: number): NativeSharedFile[];
 };
 
@@ -29,6 +31,28 @@ export function requestMediaManagementAccess(): boolean {
   const nativeModule = getNativeMediaDelete();
   if (!nativeModule) return false;
   return nativeModule.requestMediaManagementAccess();
+}
+
+export function hasAllFilesAccess(): boolean {
+  const nativeModule = getNativeMediaDelete();
+  if (!nativeModule) return false;
+  try {
+    return nativeModule.hasAllFilesAccess();
+  } catch (error) {
+    console.warn('[SwyftPixMediaDelete] All Files Access check failed:', error);
+    return false;
+  }
+}
+
+export function requestAllFilesAccess(): boolean {
+  const nativeModule = getNativeMediaDelete();
+  if (!nativeModule) return false;
+  try {
+    return nativeModule.requestAllFilesAccess();
+  } catch (error) {
+    console.warn('[SwyftPixMediaDelete] Could not open All Files Access settings:', error);
+    return false;
+  }
 }
 
 export function listSharedFiles(
@@ -52,7 +76,7 @@ function getNativeMediaDelete(): NativeMediaDeleteModule | null {
   try {
     return requireNativeModule<NativeMediaDeleteModule>('SwyftPixMediaDelete');
   } catch (error) {
-    console.warn('[SwyftPixMediaDelete] Native module is unavailable; using MediaLibrary fallback.', error);
+    console.warn('[SwyftPixMediaDelete] Native module is unavailable; using platform fallback.', error);
     return null;
   }
 }
