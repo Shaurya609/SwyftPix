@@ -13,7 +13,7 @@ import { ThemedView } from '@/components/themed-view';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { MockMediaItem } from '@/types/media';
 import { checkAndRequestPermissions, fetchDeviceMediaPage } from '@/utils/device-media';
-import { hasUserFileAccess, requestUserDirectoryAccess, requestUserFileAccess } from '@/utils/file-access';
+import { hasUserFileAccess, requestUserDirectoryAccess } from '@/utils/file-access';
 import { canManageMedia, requestMediaManagementAccess } from '@/modules/swyftpix-media-delete';
 import { initialize, trashAsset, restoreAsset, keepAsset, undoKeep, getReviewedAssetIds, getTrashedAssets } from '@/utils/trash-service';
 
@@ -82,19 +82,23 @@ export default function HomeScreen() {
 
   const requestFileAccessSetup = useCallback(() => {
     if (Platform.OS !== 'android') {
-      Alert.alert('File access unavailable', 'File cleanup for this platform will be enabled when its native file-access provider is implemented. Your existing media remains available.');
+      Alert.alert('File cleanup unavailable', 'This platform-specific storage provider has not been implemented yet. Your supported media categories remain available.');
       return;
     }
     Alert.alert(
-      'Choose files for SwyftPix',
-      'Android protects documents, archives, APKs and other shared files separately from photos and videos. Choose folders you want SwyftPix to review, or select individual files. SwyftPix will only access what you explicitly choose.',
+      'Allow SwyftPix to manage storage?',
+      'SwyftPix needs broad shared-storage access to find documents, APKs, archives and other user files automatically. It will not scan Android system or app-private directories, and protected locations are excluded before files reach the review queue.',
       [
         { text: 'Not now', style: 'cancel' },
-        { text: 'Choose files', onPress: async () => { const granted = await requestUserFileAccess(); if (granted) { setHasFileAccess(true); firstPageCache.current.clear(); if (selectedCategory) await loadFirstPage(selectedCategory); } } },
-        { text: 'Choose folder', onPress: async () => { const granted = await requestUserDirectoryAccess(); if (granted) { setHasFileAccess(true); firstPageCache.current.clear(); if (selectedCategory) await loadFirstPage(selectedCategory); } } },
+        { text: 'Open Android Settings', onPress: async () => {
+          const opened = await requestUserDirectoryAccess();
+          if (!opened) return;
+          // The settings screen does not return the grant state immediately.
+          // useFocusEffect refreshes it when the user returns to SwyftPix.
+        } },
       ],
     );
-  }, [selectedCategory]);
+  }, []);
 
   const filterItems = useCallback((source: MockMediaItem[], category: HomeCategory | null, reviewedIds: Set<string>) => {
     if (!category) return [];
@@ -228,12 +232,7 @@ export default function HomeScreen() {
 
   const categorySelection = (
     <View style={styles.categoryContainer}>
-      <ScrollView
-        style={styles.categoryScroll}
-        contentContainerStyle={styles.categoryScrollContent}
-        showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
-      >
+      <ScrollView style={styles.categoryScroll} contentContainerStyle={styles.categoryScrollContent} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
         <ThemedText style={styles.categoryHeading} type="title">What do you want to clean?</ThemedText>
         <ThemedText style={styles.categorySubheading} lightColor="#687076" darkColor="#9BA1A6">Choose a file type to start swiping.</ThemedText>
         <View style={styles.categoryGrid}>
@@ -253,9 +252,9 @@ export default function HomeScreen() {
     <View style={styles.emptyContainer}>
       <View style={[styles.emptyCard, isDark ? styles.emptyCardDark : styles.emptyCardLight]}>
         <View style={styles.emptyIconContainer}><MaterialIcons name="folder-open" size={44} color="#0a7ea4" /></View>
-        <ThemedText style={styles.emptyTitle}>Choose files to review</ThemedText>
-        <ThemedText style={styles.emptyDescription} lightColor="#687076" darkColor="#9BA1A6">Android keeps documents, archives, APKs and other shared files behind user-selected file access. SwyftPix will only scan folders or files you explicitly choose.</ThemedText>
-        <TouchableOpacity style={styles.resetButton} onPress={requestFileAccessSetup} activeOpacity={0.8}><ThemedText style={styles.resetButtonText}>Choose Files or Folders</ThemedText></TouchableOpacity>
+        <ThemedText style={styles.emptyTitle}>Enable storage access</ThemedText>
+        <ThemedText style={styles.emptyDescription} lightColor="#687076" darkColor="#9BA1A6">SwyftPix needs Android's All Files Access to automatically find documents, APKs, archives and other shared files. Protected Android system and app-private locations are excluded from scanning.</ThemedText>
+        <TouchableOpacity style={styles.resetButton} onPress={requestFileAccessSetup} activeOpacity={0.8}><ThemedText style={styles.resetButtonText}>Allow Storage Access</ThemedText></TouchableOpacity>
       </View>
     </View>
   );
@@ -273,7 +272,7 @@ export default function HomeScreen() {
 
   return (
     <GestureHandlerRootView style={styles.container}>
-      <ThemedView style={[styles.screen, { paddingTop: insets.top, paddingBottom: insets.bottom || 16 }]}> 
+      <ThemedView style={[styles.screen, { paddingTop: insets.top, paddingBottom: insets.bottom || 16 }]}>
         <View style={styles.header}>
           <View style={styles.headerLeft}><MaterialIcons name="auto-awesome" size={24} color="#0a7ea4" /><ThemedText style={styles.headerTitle} type="title">SwyftPix</ThemedText></View>
           <ThemedText style={styles.headerSubtitle} lightColor="#687076" darkColor="#9BA1A6">Clean up your storage</ThemedText>
