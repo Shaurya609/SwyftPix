@@ -25,14 +25,31 @@ import { TrashedAsset } from '@/types/media';
 function formatExpiry(expiresAt: string | null): string {
   if (!expiresAt) return 'Never auto-deletes';
   const remainingMs = new Date(expiresAt).getTime() - Date.now();
-  if (remainingMs <= 0) return 'Expires today';
+  if (remainingMs <= 0) return 'Expires now';
+
+  const remainingSeconds = Math.ceil(remainingMs / 1000);
+  if (remainingSeconds < 60) {
+    return `Auto-deletes in ${remainingSeconds} sec`;
+  }
+
+  const remainingMinutes = Math.ceil(remainingSeconds / 60);
+  if (remainingMinutes < 60) {
+    return `Auto-deletes in ${remainingMinutes} min`;
+  }
+
+  const remainingHours = Math.ceil(remainingMinutes / 60);
+  if (remainingHours < 24) {
+    return `Auto-deletes in ${remainingHours} hr${remainingHours === 1 ? '' : 's'}`;
+  }
+
   const remainingDays = Math.ceil(remainingMs / (24 * 60 * 60 * 1000));
   return `Auto-deletes in ${remainingDays} day${remainingDays === 1 ? '' : 's'}`;
 }
 
-function retentionLabel(days: RetentionDays): string {
-  if (days === 0) return 'Never';
-  return `${days} days`;
+function retentionLabel(retention: RetentionDays): string {
+  if (retention === 0) return 'Never';
+  if (retention < 0) return `${Math.abs(retention)} sec`;
+  return `${retention} days`;
 }
 
 export default function TrashScreen() {
@@ -80,6 +97,16 @@ export default function TrashScreen() {
     loadTrash();
   };
 
+  const enterSelectionMode = (id: string) => {
+    if (isProcessing) return;
+    setIsSelectionMode(true);
+    setSelectedIds(previous => {
+      const next = new Set(previous);
+      next.add(id);
+      return next;
+    });
+  };
+
   const exitSelectionMode = () => {
     if (isProcessing) return;
     setSelectedIds(new Set());
@@ -94,6 +121,10 @@ export default function TrashScreen() {
       else next.add(id);
       return next;
     });
+  };
+
+  const handleItemPress = (id: string) => {
+    if (isSelectionMode) toggleSelection(id);
   };
 
   const selectAll = () => {
@@ -176,6 +207,7 @@ export default function TrashScreen() {
           style: 'destructive',
           onPress: () => {
             setSelectedIds(new Set(items.map(item => item.id)));
+            setIsSelectionMode(true);
             processSelected('delete');
           },
         },
@@ -185,11 +217,13 @@ export default function TrashScreen() {
 
   const handleRetentionChange = (nextRetention: RetentionDays) => {
     if (nextRetention === retentionDays) return;
+    const description = nextRetention === 0
+      ? 'All items currently in Trash will stop auto-deleting. New items will also be kept until you restore or permanently delete them.'
+      : `Items currently in Trash and new Trash items will automatically delete after ${retentionLabel(nextRetention)}. Existing expiration dates will be recalculated from when each item entered Trash.`;
+
     Alert.alert(
       'Change Trash retention?',
-      nextRetention === 0
-        ? 'New Trash items will be kept until you restore or permanently delete them.'
-        : `New Trash items will automatically delete after ${nextRetention} days. Existing items keep their current expiration date.`,
+      description,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -213,9 +247,11 @@ export default function TrashScreen() {
     const selected = selectedIds.has(item.id);
     return (
       <TouchableOpacity
-        onPress={() => isSelectionMode && toggleSelection(item.id)}
-        activeOpacity={isSelectionMode ? 0.8 : 1}
-        disabled={!isSelectionMode || isProcessing}
+        onPress={() => handleItemPress(item.id)}
+        onLongPress={() => enterSelectionMode(item.id)}
+        delayLongPress={450}
+        activeOpacity={0.8}
+        disabled={isProcessing}
         style={styles.gridItem}
       >
         <View style={[styles.thumbnailWrap, isDark && styles.thumbnailWrapDark, selected && styles.thumbnailWrapSelected]}>
@@ -254,7 +290,7 @@ export default function TrashScreen() {
           <View style={styles.headerTitleWrap}>
             <ThemedText type="title" style={styles.title}>Trash</ThemedText>
             <ThemedText lightColor="#687076" darkColor="#9BA1A6" style={styles.subtitle}>
-              Items you swipe left are kept here.
+              Long-press an item to select it. Tap more items to multi-select.
             </ThemedText>
           </View>
         )}
@@ -271,12 +307,6 @@ export default function TrashScreen() {
           </View>
         ) : (
           <View style={styles.headerActions}>
-            {items.length > 0 && (
-              <TouchableOpacity onPress={() => setIsSelectionMode(true)} style={styles.selectButton} activeOpacity={0.8}>
-                <MaterialIcons name="checklist" size={18} color="#0a7ea4" />
-                <ThemedText style={styles.selectButtonText}>Select</ThemedText>
-              </TouchableOpacity>
-            )}
             <View style={styles.countBadge}>
               <ThemedText style={styles.countText}>{stats.count}</ThemedText>
             </View>
@@ -311,7 +341,7 @@ export default function TrashScreen() {
           </ThemedText>
         </View>
         <ThemedText lightColor="#687076" darkColor="#9BA1A6" style={styles.retentionDescription}>
-          New Trash items use this retention period. Default is 30 days.
+          Applies to items already in Trash and new items. “5 sec” is a testing option.
         </ThemedText>
         <View style={styles.retentionOptions}>
           {RETENTION_OPTIONS.map(option => {
@@ -395,8 +425,6 @@ const styles = StyleSheet.create({
   selectionHeaderActions: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   headerAction: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 7, paddingHorizontal: 4 },
   headerActionText: { color: '#0a7ea4', fontSize: 13, fontWeight: '700' },
-  selectButton: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 8, borderRadius: 10, backgroundColor: 'rgba(10, 126, 164, 0.10)' },
-  selectButtonText: { color: '#0a7ea4', fontSize: 12, fontWeight: '700' },
   countBadge: { minWidth: 40, height: 40, paddingHorizontal: 10, borderRadius: 20, backgroundColor: 'rgba(255, 59, 48, 0.12)', alignItems: 'center', justifyContent: 'center' },
   countText: { color: '#FF3B30', fontWeight: '800', fontSize: 16 },
   selectedBadge: { minWidth: 34, height: 34, paddingHorizontal: 8, borderRadius: 17, backgroundColor: 'rgba(10, 126, 164, 0.12)', alignItems: 'center', justifyContent: 'center' },
