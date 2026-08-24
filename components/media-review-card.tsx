@@ -27,7 +27,6 @@ const FullscreenAudioPreview = ({ uri }: { uri: string }) => {
     player.play();
     return () => {
       player.pause();
-      player.remove();
     };
   }, [player]);
 
@@ -37,19 +36,47 @@ const FullscreenAudioPreview = ({ uri }: { uri: string }) => {
     player.play();
   };
 
+  const seekBy = (seconds: number) => {
+    if (!status.duration) return;
+    const target = Math.max(0, Math.min(status.duration, status.currentTime + seconds));
+    player.seekTo(target);
+  };
+
+  const seekToPosition = (locationX: number, width: number) => {
+    if (!status.duration || width <= 0) return;
+    const ratio = Math.max(0, Math.min(1, locationX / width));
+    player.seekTo(status.duration * ratio);
+  };
+
   const progress = status.duration > 0 ? Math.min(1, Math.max(0, status.currentTime / status.duration)) : 0;
 
   return (
     <View style={styles.audioPreview}>
       <View style={styles.audioIconCircle}><MaterialIcons name="audiotrack" size={72} color="#FFFFFF" /></View>
       <Text style={styles.audioLabel}>AUDIO FILE</Text>
-      <TouchableOpacity style={styles.audioPlayButton} onPress={togglePlayback} activeOpacity={0.8} accessibilityRole="button" accessibilityLabel={status.playing ? 'Pause audio' : 'Play audio'}>
-        <MaterialIcons name={status.playing ? 'pause' : 'play-arrow'} size={42} color="#FFFFFF" style={status.playing ? undefined : { marginLeft: 3 }} />
-      </TouchableOpacity>
-      <View style={styles.audioTimeline}>
+
+      <View style={styles.audioControlsRow}>
+        <TouchableOpacity style={styles.audioSkipButton} onPress={() => seekBy(-10)} activeOpacity={0.8} accessibilityRole="button" accessibilityLabel="Back 10 seconds">
+          <MaterialIcons name="replay-10" size={30} color="#FFFFFF" />
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.audioPlayButton} onPress={togglePlayback} activeOpacity={0.8} accessibilityRole="button" accessibilityLabel={status.playing ? 'Pause audio' : 'Play audio'}>
+          <MaterialIcons name={status.playing ? 'pause' : 'play-arrow'} size={42} color="#FFFFFF" style={status.playing ? undefined : { marginLeft: 3 }} />
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.audioSkipButton} onPress={() => seekBy(10)} activeOpacity={0.8} accessibilityRole="button" accessibilityLabel="Forward 10 seconds">
+          <MaterialIcons name="forward-10" size={30} color="#FFFFFF" />
+        </TouchableOpacity>
+      </View>
+
+      <TouchableOpacity
+        style={styles.audioTimeline}
+        activeOpacity={1}
+        onPress={(event) => seekToPosition(event.nativeEvent.locationX, event.nativeEvent.width)}
+        accessibilityRole="adjustable"
+        accessibilityLabel="Audio timeline"
+      >
         <View style={styles.audioTrack}><View style={[styles.audioProgress, { width: `${progress * 100}%` }]} /></View>
         <View style={styles.audioTimeRow}><Text style={styles.audioTime}>{formatTime(status.currentTime)}</Text><Text style={styles.audioTime}>{formatTime(status.duration)}</Text></View>
-      </View>
+      </TouchableOpacity>
     </View>
   );
 };
@@ -156,10 +183,12 @@ const styles = StyleSheet.create({
   audioPreview: { width: '88%', alignItems: 'center', justifyContent: 'center' },
   audioIconCircle: { width: 150, height: 150, borderRadius: 75, backgroundColor: '#6C5CE7', justifyContent: 'center', alignItems: 'center', marginBottom: 24 },
   audioLabel: { color: '#FFFFFF', fontSize: 14, fontWeight: '800', letterSpacing: 2, marginBottom: 28 },
-  audioPlayButton: { width: 72, height: 72, borderRadius: 36, backgroundColor: '#6C5CE7', justifyContent: 'center', alignItems: 'center', marginBottom: 24 },
-  audioTimeline: { width: '100%' },
-  audioTrack: { height: 5, borderRadius: 3, overflow: 'hidden', backgroundColor: 'rgba(255, 255, 255, 0.25)' },
-  audioProgress: { height: '100%', borderRadius: 3, backgroundColor: '#FFFFFF' },
+  audioControlsRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 20, marginBottom: 24 },
+  audioSkipButton: { width: 48, height: 48, borderRadius: 24, backgroundColor: 'rgba(108, 92, 231, 0.85)', justifyContent: 'center', alignItems: 'center' },
+  audioPlayButton: { width: 72, height: 72, borderRadius: 36, backgroundColor: '#6C5CE7', justifyContent: 'center', alignItems: 'center' },
+  audioTimeline: { width: '100%', paddingVertical: 8 },
+  audioTrack: { height: 7, borderRadius: 4, overflow: 'hidden', backgroundColor: 'rgba(255, 255, 255, 0.25)' },
+  audioProgress: { height: '100%', borderRadius: 4, backgroundColor: '#FFFFFF' },
   audioTimeRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 },
   audioTime: { color: '#B0B0B0', fontSize: 12, fontWeight: '600' },
 });
