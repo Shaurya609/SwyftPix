@@ -11,7 +11,14 @@ import { MockMediaItem } from '../types/media';
 import { MediaPreviewContainer } from './media-preview-container';
 
 export interface MediaReviewCardRef { swipeLeft: () => void; swipeRight: () => void; }
-interface MediaReviewCardProps { item: MockMediaItem; onSwipeLeft: () => void; onSwipeRight: () => void; isTop: boolean; style?: any; }
+interface MediaReviewCardProps {
+  items: MockMediaItem[];
+  onSwipeLeft: (item: MockMediaItem) => void | Promise<void>;
+  onSwipeRight: (item: MockMediaItem) => void | Promise<void>;
+  onUndo?: () => void | Promise<void>;
+  onReset?: () => void | Promise<void>;
+  isDark?: boolean;
+}
 interface VideoPlayerViewProps { uri: string; style?: any; }
 
 const VideoPlayerView = ({ uri, style }: VideoPlayerViewProps) => {
@@ -25,19 +32,11 @@ const FullscreenAudioPreview = ({ uri }: { uri: string }) => {
   const [timelineWidth, setTimelineWidth] = useState(0);
 
   useEffect(() => {
-    // The hook owns the player's lifecycle and releases it on unmount.
-    // Do not call player.pause() from cleanup: React/Expo can release the
-    // native SharedObject before this cleanup runs, which causes the
-    // "Cannot use shared object that was already released" error.
     setIsAudioActiveAsync(true)
       .catch((error) => console.warn('[AudioPreview] Unable to activate audio:', error));
     player.play();
 
     return () => {
-      // Disable the app audio subsystem globally so an orphaned development
-      // player cannot continue playing after the preview modal closes.
-      // This is intentionally not player.pause(), because the hook owns and
-      // releases that player automatically.
       setIsAudioActiveAsync(false).catch(() => {});
     };
   }, [player]);
@@ -79,7 +78,10 @@ const FullscreenAudioPreview = ({ uri }: { uri: string }) => {
         accessibilityRole="adjustable"
         accessibilityLabel="Audio timeline"
       >
-        <View style={styles.audioTrack}><View style={[styles.audioProgress, { width: `${progress * 100}%` }]} /></View>
+        <View style={styles.audioTrack}>
+          <View style={[styles.audioProgress, { width: `${progress * 100}%` }]} />
+          <View style={[styles.audioThumb, { left: `${progress * 100}%` }]} />
+        </View>
         <View style={styles.audioTimeRow}><Text style={styles.audioTime}>{formatTime(status.currentTime)}</Text><Text style={styles.audioTime}>{formatTime(status.duration)}</Text></View>
       </TouchableOpacity>
     </View>
@@ -92,22 +94,24 @@ function formatTime(seconds: number): string {
   return `${Math.floor(wholeSeconds / 60)}:${(wholeSeconds % 60).toString().padStart(2, '0')}`;
 }
 
-export const MediaReviewCard = forwardRef<MediaReviewCardRef, MediaReviewCardProps>(({ item, onSwipeLeft, onSwipeRight, isTop, style }, ref) => {
+export const MediaReviewCard = forwardRef<MediaReviewCardRef, MediaReviewCardProps>(({ items, onSwipeLeft, onSwipeRight }, ref) => {
   const { width: screenWidth } = useWindowDimensions();
   const SWIPE_THRESHOLD = screenWidth * 0.35;
+  const item = items[0]!;
+  const nextItem = items[1];
   const [isPreviewVisible, setIsPreviewVisible] = useState(false);
   const translateX = useSharedValue(0);
   const translateY = useSharedValue(0);
   const maxRotation = 12;
 
   useImperativeHandle(ref, () => ({
-    swipeLeft: () => { translateX.value = withTiming(-screenWidth * 1.5, { duration: 300 }, () => runOnJS(onSwipeLeft)()); },
-    swipeRight: () => { translateX.value = withTiming(screenWidth * 1.5, { duration: 300 }, () => runOnJS(onSwipeRight)()); },
-  }));
+    swipeLeft: () => { translateX.value = withTiming(-screenWidth * 1.5, { duration: 300 }, () => runOnJS(onSwipeLeft)(item)); },
+    swipeRight: () => { translateX.value = withTiming(screenWidth * 1.5, { duration: 300 }, () => runOnJS(onSwipeRight)(item)); },
+  }), [item, onSwipeLeft, onSwipeRight, screenWidth]);
 
-  const panGesture = Gesture.Pan().enabled(isTop).onUpdate((event) => { translateX.value = event.translationX; translateY.value = event.translationY; }).onEnd((event) => {
-    if (event.translationX > SWIPE_THRESHOLD) translateX.value = withSpring(screenWidth * 1.5, { velocity: Math.max(event.velocityX, 800) }, () => runOnJS(onSwipeRight)());
-    else if (event.translationX < -SWIPE_THRESHOLD) translateX.value = withSpring(-screenWidth * 1.5, { velocity: Math.min(event.velocityX, -800) }, () => runOnJS(onSwipeLeft)());
+  const panGesture = Gesture.Pan().enabled(!!item).onUpdate((event) => { translateX.value = event.translationX; translateY.value = event.translationY; }).onEnd((event) => {
+    if (event.translationX > SWIPE_THRESHOLD) translateX.value = withSpring(screenWidth * 1.5, { velocity: Math.max(event.velocityX, 800) }, () => runOnJS(onSwipeRight)(item));
+    else if (event.translationX < -SWIPE_THRESHOLD) translateX.value = withSpring(-screenWidth * 1.5, { velocity: Math.min(event.velocityX, -800) }, () => runOnJS(onSwipeLeft)(item));
     else { translateX.value = withSpring(0, { damping: 15 }); translateY.value = withSpring(0, { damping: 15 }); }
   });
 
@@ -124,26 +128,36 @@ export const MediaReviewCard = forwardRef<MediaReviewCardRef, MediaReviewCardPro
     } else setIsPreviewVisible(true);
   };
 
-  const tapGesture = Gesture.Tap().enabled(isTop).onEnd(() => runOnJS(handlePress)());
+  const tapGesture = Gesture.Tap().enabled(!!item).onEnd(() => runOnJS(handlePress)());
   const combinedGesture = Gesture.Exclusive(panGesture, tapGesture);
+
+  if (!item) return null;
 
   return (
     <GestureDetector gesture={combinedGesture}>
-      <Animated.View style={[styles.cardWrapper, style, isTop && animatedCardStyle]}>
-        <MediaPreviewContainer item={item} isTop={isTop} />
-        {isTop && <><Animated.View style={[styles.badgeContainer, styles.keepBadge, animatedKeepBadgeStyle]}><Text style={styles.keepText}>KEEP</Text></Animated.View><Animated.View style={[styles.badgeContainer, styles.deleteBadge, animatedDeleteBadgeStyle]}><Text style={styles.deleteText}>DELETE</Text></Animated.View></>}
-        <Modal visible={isPreviewVisible} transparent={false} animationType="slide" onRequestClose={closePreview}>
-          <View style={styles.modalContainer}>
-            <View style={styles.modalHeader}>
-              <View style={styles.modalMeta}><Text style={styles.modalTitle} numberOfLines={1}>{item.fileName}</Text><Text style={styles.modalSubtitle}>{(item.fileSize / (1024 * 1024)).toFixed(2)} MB</Text></View>
-              <TouchableOpacity style={styles.closeButton} onPress={closePreview} activeOpacity={0.7}><MaterialIcons name="close" size={26} color="#FFFFFF" /></TouchableOpacity>
-            </View>
-            <View style={styles.modalContent}>
-              {item.fileType === 'video' ? <VideoPlayerView uri={item.uri} style={styles.fullVideo} /> : item.fileType === 'audio' ? <FullscreenAudioPreview uri={item.uri} /> : <Image source={{ uri: item.uri }} style={styles.fullImage} contentFit="contain" />}
-            </View>
+      <View style={styles.stackContainer}>
+        {nextItem ? (
+          <View style={[styles.cardWrapper, styles.backCard]}>
+            <MediaPreviewContainer item={nextItem} isTop={false} />
           </View>
-        </Modal>
-      </Animated.View>
+        ) : null}
+        <Animated.View style={[styles.cardWrapper, animatedCardStyle]}>
+          <MediaPreviewContainer item={item} isTop />
+          <Animated.View style={[styles.badgeContainer, styles.keepBadge, animatedKeepBadgeStyle]}><Text style={styles.keepText}>KEEP</Text></Animated.View>
+          <Animated.View style={[styles.badgeContainer, styles.deleteBadge, animatedDeleteBadgeStyle]}><Text style={styles.deleteText}>DELETE</Text></Animated.View>
+          <Modal visible={isPreviewVisible} transparent={false} animationType="slide" onRequestClose={closePreview}>
+            <View style={styles.modalContainer}>
+              <View style={styles.modalHeader}>
+                <View style={styles.modalMeta}><Text style={styles.modalTitle} numberOfLines={1}>{item.fileName}</Text><Text style={styles.modalSubtitle}>{(item.fileSize / (1024 * 1024)).toFixed(2)} MB</Text></View>
+                <TouchableOpacity style={styles.closeButton} onPress={closePreview} activeOpacity={0.7}><MaterialIcons name="close" size={26} color="#FFFFFF" /></TouchableOpacity>
+              </View>
+              <View style={styles.modalContent}>
+                {item.fileType === 'video' ? <VideoPlayerView uri={item.uri} style={styles.fullVideo} /> : item.fileType === 'audio' ? <FullscreenAudioPreview uri={item.uri} /> : <Image source={{ uri: item.uri }} style={styles.fullImage} contentFit="contain" />}
+              </View>
+            </View>
+          </Modal>
+        </Animated.View>
+      </View>
     </GestureDetector>
   );
 });
@@ -151,7 +165,9 @@ export const MediaReviewCard = forwardRef<MediaReviewCardRef, MediaReviewCardPro
 MediaReviewCard.displayName = 'MediaReviewCard';
 
 const styles = StyleSheet.create({
+  stackContainer: { ...StyleSheet.absoluteFillObject, justifyContent: 'center', alignItems: 'center' },
   cardWrapper: { ...StyleSheet.absoluteFillObject, justifyContent: 'center', alignItems: 'center' },
+  backCard: { transform: [{ scale: 0.96 }, { translateY: 10 }], opacity: 0.9 },
   badgeContainer: { position: 'absolute', top: 35, borderWidth: 4, borderRadius: 8, paddingHorizontal: 15, paddingVertical: 5, zIndex: 10, elevation: 10, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.15, shadowRadius: 3 },
   keepBadge: { left: 45, borderColor: '#34C759', transform: [{ rotate: '-15deg' }], backgroundColor: 'rgba(52, 199, 89, 0.9)' },
   deleteBadge: { right: 45, borderColor: '#FF3B30', transform: [{ rotate: '15deg' }], backgroundColor: 'rgba(255, 59, 48, 0.9)' },
@@ -173,8 +189,9 @@ const styles = StyleSheet.create({
   audioSkipButton: { width: 48, height: 48, borderRadius: 24, backgroundColor: 'rgba(108, 92, 231, 0.85)', justifyContent: 'center', alignItems: 'center' },
   audioPlayButton: { width: 72, height: 72, borderRadius: 36, backgroundColor: '#6C5CE7', justifyContent: 'center', alignItems: 'center' },
   audioTimeline: { width: '100%', paddingVertical: 8 },
-  audioTrack: { height: 7, borderRadius: 4, overflow: 'hidden', backgroundColor: 'rgba(255, 255, 255, 0.25)' },
+  audioTrack: { height: 7, borderRadius: 4, overflow: 'visible', backgroundColor: 'rgba(255, 255, 255, 0.25)', position: 'relative' },
   audioProgress: { height: '100%', borderRadius: 4, backgroundColor: '#FFFFFF' },
+  audioThumb: { position: 'absolute', top: -4, marginLeft: -6, width: 15, height: 15, borderRadius: 8, backgroundColor: '#FFFFFF', borderWidth: 2, borderColor: '#6C5CE7' },
   audioTimeRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 },
   audioTime: { color: '#B0B0B0', fontSize: 12, fontWeight: '600' },
 });
