@@ -6,6 +6,7 @@ import { formatFileSize, formatDate } from '../utils/formatters';
 import { ThemedText } from './themed-text';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
+import { AudioPreview } from './audio-preview';
 
 interface MediaPreviewContainerProps {
   item: MockMediaItem;
@@ -93,7 +94,8 @@ export function MediaPreviewContainer({ item, isTop }: MediaPreviewContainerProp
             <Text style={[styles.genericTypeLabel, { color: isDark ? '#FFFFFF' : '#333333' }]}>
               {isAudio ? 'AUDIO FILE' : isDocument ? item.fileType.toUpperCase() : item.fileType.toUpperCase()}
             </Text>
-            {item.duration && (
+            {isAudio ? <AudioPreview uri={item.uri} /> : null}
+            {item.duration && !isAudio && (
               <View style={styles.durationBadge}>
                 <Text style={styles.durationText}>{item.duration}</Text>
               </View>
@@ -206,6 +208,7 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '800',
     letterSpacing: 1.5,
+    marginBottom: 18,
   },
   videoOverlay: {
     ...StyleSheet.absoluteFillObject,
