@@ -2,7 +2,6 @@ import * as MediaLibrary from 'expo-media-library';
 import { File } from 'expo-file-system';
 import { MockMediaItem, MediaType } from '../types/media';
 import { listSharedFiles } from '../modules/swyftpix-media-delete';
-import { listUserFiles } from './file-access';
 
 let albumCache: Map<string, string> | null = null;
 
@@ -35,8 +34,8 @@ async function getAlbumMap(): Promise<Map<string, string>> {
 }
 
 /**
- * Centralized source classification for every media provider.
- * Safety filtering happens natively before shared files reach this function.
+ * Centralized source classification for every storage provider.
+ * Native Android safety filtering happens before shared files reach this function.
  * WhatsApp is intentionally checked before generic folder/category rules so
  * WhatsApp documents, archives and APKs retain their real source label.
  */
@@ -118,12 +117,9 @@ function nativeFileCategory(category: DeviceMediaCategory): NativeFileCategory {
 
 async function mapSharedFiles(category: DeviceMediaCategory): Promise<MockMediaItem[]> {
   const nativeCategory = nativeFileCategory(category);
-  const [mediaStoreFiles, userFiles] = await Promise.all([
-    Promise.resolve(listSharedFiles(nativeCategory, 40)),
-    listUserFiles(nativeCategory, 80),
-  ]);
-  const nativeFiles = [...mediaStoreFiles, ...userFiles];
+  const nativeFiles = listSharedFiles(nativeCategory, 100);
   const seen = new Set<string>();
+
   return nativeFiles.filter(file => {
     if (seen.has(file.uri)) return false;
     seen.add(file.uri);
