@@ -19,6 +19,8 @@ type NativeMediaDeleteModule = {
   hasAllFilesAccess(): boolean;
   requestAllFilesAccess(): boolean;
   listSharedFiles(category: 'document' | 'archive' | 'apk' | 'other' | 'all', limit: number): NativeSharedFile[];
+  renderPdfPage(uri: string, pageIndex: number, maxWidth: number): Promise<string | null>;
+  getPdfPageCount(uri: string): Promise<number>;
 };
 
 export function canManageMedia(): boolean {
@@ -67,6 +69,28 @@ export function listSharedFiles(
   } catch (error) {
     console.warn('[SwyftPixMediaDelete] Shared file discovery failed:', error);
     return [];
+  }
+}
+
+export async function renderPdfPage(uri: string, pageIndex = 0, maxWidth = 1200): Promise<string | null> {
+  const nativeModule = getNativeMediaDelete();
+  if (!nativeModule) return null;
+  try {
+    return await nativeModule.renderPdfPage(uri, pageIndex, maxWidth);
+  } catch (error) {
+    console.warn('[SwyftPixMediaDelete] PDF page rendering failed:', error);
+    return null;
+  }
+}
+
+export async function getPdfPageCount(uri: string): Promise<number> {
+  const nativeModule = getNativeMediaDelete();
+  if (!nativeModule) return 0;
+  try {
+    return await nativeModule.getPdfPageCount(uri);
+  } catch (error) {
+    console.warn('[SwyftPixMediaDelete] PDF page count failed:', error);
+    return 0;
   }
 }
 
