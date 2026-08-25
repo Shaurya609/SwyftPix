@@ -343,7 +343,13 @@ class SwyftPixMediaDeleteModule : Module() {
     }
     val collection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY) else MediaStore.Files.getContentUri("external")
     return try {
-      resolver.query(collection, arrayOf(MediaStore.Files.FileColumns._ID, MediaStore.Files.FileColumns.DISPLAY_NAME, MediaStore.Files.FileColumns.RELATIVE_PATH), "${MediaStore.Files.FileColumns.DISPLAY_NAME} = ? AND ${MediaStore.Files.FileColumns.RELATIVE_PATH} = ?", arrayOf(fileName, relativePath), null)?.use { cursor ->
+      resolver.query(
+        collection,
+        arrayOf(MediaStore.Files.FileColumns._ID, MediaStore.Files.FileColumns.DISPLAY_NAME, MediaStore.Files.FileColumns.RELATIVE_PATH),
+        "${MediaStore.Files.FileColumns.DISPLAY_NAME} = ? AND ${MediaStore.Files.FileColumns.RELATIVE_PATH} = ?",
+        arrayOf(fileName, relativePath),
+        null
+      )?.use { cursor ->
         if (!cursor.moveToFirst()) return@use null
         val name = cursor.getString(cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DISPLAY_NAME))
         val storedRelativePath = cursor.getString(cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.RELATIVE_PATH))
@@ -360,7 +366,13 @@ class SwyftPixMediaDeleteModule : Module() {
     if (uri.scheme != "content" || uri.authority != "media") return null
     val resolver = context.contentResolver
     return try {
-      resolver.query(uri, arrayOf(MediaStore.Files.FileColumns.DISPLAY_NAME, MediaStore.Files.FileColumns.RELATIVE_PATH, MediaStore.Files.FileColumns.MEDIA_TYPE), null, null, null)?.use { cursor ->
+      resolver.query(
+        uri,
+        arrayOf(MediaStore.Files.FileColumns.DISPLAY_NAME, MediaStore.Files.FileColumns.RELATIVE_PATH, MediaStore.Files.FileColumns.MEDIA_TYPE),
+        null,
+        null,
+        null
+      )?.use { cursor ->
         if (!cursor.moveToFirst()) return@use null
         val name = cursor.getString(cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DISPLAY_NAME))
         val relativePath = cursor.getString(cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.RELATIVE_PATH))
@@ -374,5 +386,4 @@ class SwyftPixMediaDeleteModule : Module() {
       null
     }
   }
-
 }
