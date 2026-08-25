@@ -18,6 +18,7 @@ import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import java.io.File
 import java.io.FileOutputStream
+import java.io.InputStreamReader
 
 class SwyftPixMediaDeleteModule : Module() {
   companion object {
@@ -81,6 +82,10 @@ class SwyftPixMediaDeleteModule : Module() {
       getPdfPageCount(uriString)
     }
 
+    AsyncFunction("readTextFile") { uriString: String, maxChars: Int ->
+      readTextFile(uriString, maxChars.coerceIn(1024, 262144))
+    }
+
     AsyncFunction("deleteMediaByPath") { path: String, promise: Promise ->
       if (pendingPromise != null) {
         promise.reject("E_DELETE_BUSY", "Another media deletion is awaiting Android authorization.", null)
@@ -130,6 +135,28 @@ class SwyftPixMediaDeleteModule : Module() {
       val promise = pendingPromise
       pendingPromise = null
       promise?.resolve(payload.resultCode == Activity.RESULT_OK)
+    }
+  }
+
+  private fun readTextFile(uriString: String, maxChars: Int): String? {
+    if (!uriString.startsWith("content://")) return null
+    return try {
+      context.contentResolver.openInputStream(Uri.parse(uriString))?.use { input ->
+        InputStreamReader(input, Charsets.UTF_8).use { reader ->
+          val buffer = CharArray(4096)
+          val output = StringBuilder(minOf(maxChars, 65536))
+          while (output.length < maxChars) {
+            val remaining = maxChars - output.length
+            val count = reader.read(buffer, 0, minOf(buffer.size, remaining))
+            if (count <= 0) break
+            output.append(buffer, 0, count)
+          }
+          output.toString()
+        }
+      }
+    } catch (error: Exception) {
+      Log.w(TAG, "Text file reading failed", error)
+      null
     }
   }
 
