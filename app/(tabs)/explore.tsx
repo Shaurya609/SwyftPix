@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, RefreshControl, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { Image } from 'expo-image';
+import { useFocusEffect } from '@react-navigation/native';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 
 import { ThemedText } from '@/components/themed-text';
@@ -74,9 +75,11 @@ export default function TrashScreen() {
     }
   }, []);
 
-  useEffect(() => {
-    loadTrash();
-  }, [loadTrash]);
+  useFocusEffect(
+    useCallback(() => {
+      loadTrash();
+    }, [loadTrash])
+  );
 
   const handleRefresh = () => {
     setIsRefreshing(true);
