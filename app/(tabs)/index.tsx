@@ -84,14 +84,10 @@ export default function HomeScreen() {
       Alert.alert('File cleanup unavailable', 'This platform-specific storage provider has not been implemented yet. Your supported media categories remain available.');
       return;
     }
-    Alert.alert(
-      'Allow SwyftPix to manage storage?',
-      'SwyftPix needs broad shared-storage access to find documents, APKs and archives automatically. It will not scan Android system or app-private directories, and protected locations are excluded before files reach the review queue.',
-      [
-        { text: 'Not now', style: 'cancel' },
-        { text: 'Open Android Settings', onPress: async () => { await requestUserDirectoryAccess(); } },
-      ],
-    );
+    Alert.alert('Allow SwyftPix to manage storage?', 'SwyftPix needs broad shared-storage access to find documents, APKs and archives automatically. It will not scan Android system or app-private directories, and protected locations are excluded before files reach the review queue.', [
+      { text: 'Not now', style: 'cancel' },
+      { text: 'Open Android Settings', onPress: async () => { await requestUserDirectoryAccess(); } },
+    ]);
   }, []);
 
   const filterItems = useCallback((source: MockMediaItem[], category: HomeCategory | null, reviewedIds: Set<string>) => {
@@ -103,21 +99,15 @@ export default function HomeScreen() {
     setIsLoadingDeviceMedia(true);
     try {
       const reviewedIds = await getReviewedAssetIds();
-      if (isFileCategory(category) && !hasFileAccess) {
-        setItems([]); setEndCursor(undefined); setHasNextPage(false); return;
-      }
-      if (!hasPermission && !isFileCategory(category)) {
-        setItems(filterItems(MOCK_MEDIA_ITEMS, category, reviewedIds));
-        setEndCursor(undefined); setHasNextPage(false); return;
-      }
+      if (isFileCategory(category) && !hasFileAccess) { setItems([]); setEndCursor(undefined); setHasNextPage(false); return; }
+      if (!hasPermission && !isFileCategory(category)) { setItems(filterItems(MOCK_MEDIA_ITEMS, category, reviewedIds)); setEndCursor(undefined); setHasNextPage(false); return; }
       const cached = firstPageCache.current.get(category);
       const result = cached ?? await fetchDeviceMediaPage(40, undefined, category);
       if (!cached) firstPageCache.current.set(category, result);
       setItems(filterItems(result.items, category, reviewedIds));
       setEndCursor(result.endCursor); setHasNextPage(result.hasNextPage);
-    } catch (err) {
-      console.error('[HomeScreen] Error loading category:', err); setItems([]);
-    } finally { setIsLoadingDeviceMedia(false); }
+    } catch (err) { console.error('[HomeScreen] Error loading category:', err); setItems([]); }
+    finally { setIsLoadingDeviceMedia(false); }
   }, [filterItems, hasPermission, hasFileAccess]);
 
   useEffect(() => {
@@ -212,58 +202,30 @@ export default function HomeScreen() {
     catch (err) { console.error('[HomeScreen] Error persisting undo action:', err); }
   };
 
-  const handleReset = async () => { setHistory([]); setKeptItems([]); if (selectedCategory) await loadFirstPage(selectedCategory); };
-
   const categorySelection = (
     <View style={styles.categoryContainer}>
       <ScrollView style={styles.categoryScroll} contentContainerStyle={styles.categoryScrollContent} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
         <ThemedText style={styles.categoryHeading} type="title">What do you want to clean?</ThemedText>
         <ThemedText style={styles.categorySubheading} lightColor="#687076" darkColor="#9BA1A6">Choose a file type to start swiping.</ThemedText>
-        <View style={styles.categoryGrid}>
-          {CATEGORIES.map(category => (
-            <TouchableOpacity key={category.id} style={[styles.categoryCard, isDark ? styles.categoryCardDark : styles.categoryCardLight]} onPress={() => handleSelectCategory(category.id)} activeOpacity={0.85}>
-              <View style={styles.categoryIcon}><MaterialIcons name={category.icon as any} size={34} color="#0a7ea4" /></View>
-              <ThemedText style={styles.categoryLabel} type="defaultSemiBold">{category.label}</ThemedText>
-              <ThemedText style={styles.categorySubtitle} lightColor="#687076" darkColor="#9BA1A6">{category.subtitle}</ThemedText>
-            </TouchableOpacity>
-          ))}
-        </View>
+        <View style={styles.categoryGrid}>{CATEGORIES.map(category => <TouchableOpacity key={category.id} style={[styles.categoryCard, isDark ? styles.categoryCardDark : styles.categoryCardLight]} onPress={() => handleSelectCategory(category.id)} activeOpacity={0.85}><View style={styles.categoryIcon}><MaterialIcons name={category.icon as any} size={34} color="#0a7ea4" /></View><ThemedText style={styles.categoryLabel} type="defaultSemiBold">{category.label}</ThemedText><ThemedText style={styles.categorySubtitle} lightColor="#687076" darkColor="#9BA1A6">{category.subtitle}</ThemedText></TouchableOpacity>)}</View>
       </ScrollView>
     </View>
   );
 
   const fileAccessCard = (
-    <View style={styles.emptyContainer}>
-      <View style={[styles.emptyCard, isDark ? styles.emptyCardDark : styles.emptyCardLight]}>
-        <View style={styles.emptyIconContainer}><MaterialIcons name="folder-open" size={44} color="#0a7ea4" /></View>
-        <ThemedText style={styles.emptyTitle}>Enable storage access</ThemedText>
-        <ThemedText style={styles.emptyDescription} lightColor="#687076" darkColor="#9BA1A6">SwyftPix needs Android's All Files Access to automatically find documents, APKs and archives. Protected Android system and app-private locations are excluded from scanning.</ThemedText>
-        <TouchableOpacity style={styles.resetButton} onPress={requestFileAccessSetup} activeOpacity={0.8}><ThemedText style={styles.resetButtonText}>Allow Storage Access</ThemedText></TouchableOpacity>
-      </View>
-    </View>
+    <View style={styles.emptyContainer}><View style={[styles.emptyCard, isDark ? styles.emptyCardDark : styles.emptyCardLight]}><View style={styles.emptyIconContainer}><MaterialIcons name="folder-open" size={44} color="#0a7ea4" /></View><ThemedText style={styles.emptyTitle}>Enable storage access</ThemedText><ThemedText style={styles.emptyDescription} lightColor="#687076" darkColor="#9BA1A6">SwyftPix needs Android's All Files Access to automatically find documents, APKs and archives. Protected Android system and app-private locations are excluded from scanning.</ThemedText><TouchableOpacity style={styles.resetButton} onPress={requestFileAccessSetup} activeOpacity={0.8}><ThemedText style={styles.resetButtonText}>Allow Storage Access</ThemedText></TouchableOpacity></View></View>
   );
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <ThemedView style={[styles.container, { paddingTop: insets.top + 8 }]}>
-        <View style={styles.header}>
-          <View><ThemedText style={styles.headerTitle} type="title">SwyftPix</ThemedText><ThemedText style={styles.headerSubtitle} lightColor="#687076" darkColor="#9BA1A6">Clean up your storage</ThemedText></View>
-        </View>
+        <View style={styles.header}><View><ThemedText style={styles.headerTitle} type="title">SwyftPix</ThemedText><ThemedText style={styles.headerSubtitle} lightColor="#687076" darkColor="#9BA1A6">Clean up your storage</ThemedText></View></View>
         <StorageSummary reviewableSize={reviewableSize} reviewableCount={reviewableCount} cleanedSize={spaceSaved} />
         {selectedCategory === null ? categorySelection : (
           <>
-            <View style={styles.modeHeader}>
-              <TouchableOpacity onPress={handleChangeCategory} style={styles.modeBackButton} activeOpacity={0.8}><MaterialIcons name="arrow-back" size={22} color="#0a7ea4" /></TouchableOpacity>
-              <View style={styles.modeTitleContainer}><ThemedText style={styles.modeTitle} type="defaultSemiBold">{CATEGORIES.find(c => c.id === selectedCategory)?.label}</ThemedText><ThemedText style={styles.modeSubtitle} lightColor="#687076" darkColor="#9BA1A6">Swipe to keep or trash</ThemedText></View>
-            </View>
+            <View style={styles.modeHeader}><TouchableOpacity onPress={handleChangeCategory} style={styles.modeBackButton} activeOpacity={0.8}><MaterialIcons name="arrow-back" size={22} color="#0a7ea4" /></TouchableOpacity><View style={styles.modeTitleContainer}><ThemedText style={styles.modeTitle} type="defaultSemiBold">{CATEGORIES.find(c => c.id === selectedCategory)?.label}</ThemedText><ThemedText style={styles.modeSubtitle} lightColor="#687076" darkColor="#9BA1A6">Swipe to keep or trash</ThemedText></View></View>
             <View style={styles.cardContainer}>
-              {hasPermission && hasMediaManagementAccess === false ? (
-                <View style={styles.emptyContainer}><View style={[styles.emptyCard, isDark ? styles.emptyCardDark : styles.emptyCardLight]}><View style={styles.emptyIconContainer}><MaterialIcons name="security" size={44} color="#0a7ea4" /></View><ThemedText style={styles.emptyTitle}>Finish Setup</ThemedText><ThemedText style={styles.emptyDescription} lightColor="#687076" darkColor="#9BA1A6">Give SwyftPix one-time media-management access. This prevents Android from showing another permission prompt every time you permanently delete an item.</ThemedText><TouchableOpacity style={styles.resetButton} onPress={requestMediaManagementSetup} activeOpacity={0.8}><ThemedText style={styles.resetButtonText}>Open Android Settings</ThemedText></TouchableOpacity></View></View>
-              ) : isFileCategory(selectedCategory) && !hasFileAccess ? fileAccessCard : isLoadingDeviceMedia && items.length === 0 ? <ActivityIndicator size="large" color="#0a7ea4" /> : items.length > 0 ? (
-                <MediaReviewCard ref={cardRef} items={items.slice(0, 2)} onSwipeLeft={handleSwipeLeft} onSwipeRight={handleSwipeRight} onUndo={handleUndo} onReset={handleReset} isDark={isDark} />
-              ) : (
-                <View style={styles.emptyContainer}><View style={[styles.emptyCard, isDark ? styles.emptyCardDark : styles.emptyCardLight]}><View style={styles.emptyIconContainer}><MaterialIcons name="check-circle" size={44} color="#0a7ea4" /></View><ThemedText style={styles.emptyTitle}>You're all caught up</ThemedText><ThemedText style={styles.emptyDescription} lightColor="#687076" darkColor="#9BA1A6">No more {CATEGORIES.find(c => c.id === selectedCategory)?.label.toLowerCase()} need review.</ThemedText><TouchableOpacity style={styles.resetButton} onPress={handleChangeCategory} activeOpacity={0.8}><ThemedText style={styles.resetButtonText}>Choose Another Category</ThemedText></TouchableOpacity></View></View>
-              )}
+              {hasPermission && hasMediaManagementAccess === false ? <View style={styles.emptyContainer}><View style={[styles.emptyCard, isDark ? styles.emptyCardDark : styles.emptyCardLight]}><View style={styles.emptyIconContainer}><MaterialIcons name="security" size={44} color="#0a7ea4" /></View><ThemedText style={styles.emptyTitle}>Finish Setup</ThemedText><ThemedText style={styles.emptyDescription} lightColor="#687076" darkColor="#9BA1A6">Give SwyftPix one-time media-management access. This prevents Android from showing another permission prompt every time you permanently delete an item.</ThemedText><TouchableOpacity style={styles.resetButton} onPress={requestMediaManagementSetup} activeOpacity={0.8}><ThemedText style={styles.resetButtonText}>Open Android Settings</ThemedText></TouchableOpacity></View></View> : isFileCategory(selectedCategory) && !hasFileAccess ? fileAccessCard : isLoadingDeviceMedia && items.length === 0 ? <ActivityIndicator size="large" color="#0a7ea4" /> : items.length > 0 ? <MediaReviewCard ref={cardRef} items={items.slice(0, 2)} onSwipeLeft={handleSwipeLeft} onSwipeRight={handleSwipeRight} onUndo={handleUndo} isDark={isDark} /> : <View style={styles.emptyContainer}><View style={[styles.emptyCard, isDark ? styles.emptyCardDark : styles.emptyCardLight]}><View style={styles.emptyIconContainer}><MaterialIcons name="check-circle" size={44} color="#0a7ea4" /></View><ThemedText style={styles.emptyTitle}>You're all caught up</ThemedText><ThemedText style={styles.emptyDescription} lightColor="#687076" darkColor="#9BA1A6">No more {CATEGORIES.find(c => c.id === selectedCategory)?.label.toLowerCase()} need review.</ThemedText><TouchableOpacity style={styles.resetButton} onPress={handleChangeCategory} activeOpacity={0.8}><ThemedText style={styles.resetButtonText}>Choose Another Category</ThemedText></TouchableOpacity></View></View>}
             </View>
           </>
         )}
