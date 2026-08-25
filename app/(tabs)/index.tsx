@@ -54,7 +54,6 @@ export default function HomeScreen() {
   const [endCursor, setEndCursor] = useState<string | undefined>(undefined);
   const [hasNextPage, setHasNextPage] = useState(false);
   const [isLoadingDeviceMedia, setIsLoadingDeviceMedia] = useState(false);
-  const firstPageCache = useRef(new Map<HomeCategory, Awaited<ReturnType<typeof fetchDeviceMediaPage>>>());
 
   const refreshMediaManagementAccess = useCallback(() => {
     if (Platform.OS !== 'android' || Platform.Version < 31) { setHasMediaManagementAccess(true); return true; }
@@ -101,9 +100,8 @@ export default function HomeScreen() {
       const reviewedIds = await getReviewedAssetIds();
       if (isFileCategory(category) && !hasFileAccess) { setItems([]); setEndCursor(undefined); setHasNextPage(false); return; }
       if (!hasPermission && !isFileCategory(category)) { setItems(filterItems(MOCK_MEDIA_ITEMS, category, reviewedIds)); setEndCursor(undefined); setHasNextPage(false); return; }
-      const cached = firstPageCache.current.get(category);
-      const result = cached ?? await fetchDeviceMediaPage(40, undefined, category);
-      if (!cached) firstPageCache.current.set(category, result);
+
+      const result = await fetchDeviceMediaPage(40, undefined, category);
       setItems(filterItems(result.items, category, reviewedIds));
       setEndCursor(result.endCursor); setHasNextPage(result.hasNextPage);
     } catch (err) { console.error('[HomeScreen] Error loading category:', err); setItems([]); }
@@ -135,7 +133,7 @@ export default function HomeScreen() {
     let cancelled = false;
     async function refreshAfterFocus() {
       try {
-        refreshFileAccess();
+        const fileAccessGranted = refreshFileAccess();
         const managementGranted = refreshMediaManagementAccess();
         if (!managementGranted && hasPermission) { setItems([]); return; }
         await initialize();
@@ -143,6 +141,11 @@ export default function HomeScreen() {
         if (cancelled) return;
         setDeletedItems(persistedTrash);
         if (selectedCategory) await loadFirstPage(selectedCategory);
+        if (!fileAccessGranted && selectedCategory && isFileCategory(selectedCategory)) {
+          setItems([]);
+          setEndCursor(undefined);
+          setHasNextPage(false);
+        }
       } catch (err) {
         if (!cancelled) console.error('[HomeScreen] Error refreshing on focus:', err);
       }
@@ -152,7 +155,7 @@ export default function HomeScreen() {
   }, [hasPermission, refreshMediaManagementAccess, refreshFileAccess, selectedCategory, loadFirstPage]));
 
   const handleSelectCategory = useCallback(async (category: HomeCategory) => {
-    setSelectedCategory(category); setHistory([]); setKeptItems([]); setItems([]); await loadFirstPage(category);
+    setSelectedCategory(category); setHistory([]); setKeptItems([]); setItems([]); setEndCursor(undefined); setHasNextPage(false); await loadFirstPage(category);
   }, [loadFirstPage]);
 
   const handleChangeCategory = useCallback(() => {
