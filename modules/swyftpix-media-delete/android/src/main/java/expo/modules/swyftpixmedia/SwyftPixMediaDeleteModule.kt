@@ -176,6 +176,9 @@ class SwyftPixMediaDeleteModule : Module() {
 
           val mimeType = if (mimeIndex >= 0 && !cursor.isNull(mimeIndex)) cursor.getString(mimeIndex) else "application/octet-stream"
           val fileCategory = classifyFile(name, mimeType)
+          // "All Media" is a curated aggregate of supported SwyftPix categories.
+          // Unsupported/unknown files must never leak into it as a catch-all.
+          if (category == "all" && fileCategory == "other") continue
           if (category != "all" && fileCategory != category) continue
 
           val id = cursor.getLong(idIndex)
@@ -257,23 +260,5 @@ class SwyftPixMediaDeleteModule : Module() {
       Log.w(TAG, "content URI safety validation failed", error)
       null
     }
-  }
-
-  private fun findInCollection(resolver: android.content.ContentResolver, collection: Uri, label: String, fileName: String, relativePath: String): Uri? {
-    return try {
-      resolver.query(collection, arrayOf(MediaStore.MediaColumns._ID, MediaStore.MediaColumns.DISPLAY_NAME, MediaStore.MediaColumns.RELATIVE_PATH), "${MediaStore.MediaColumns.DISPLAY_NAME} = ? AND ${MediaStore.MediaColumns.RELATIVE_PATH} = ?", arrayOf(fileName, relativePath), null)?.use { cursor ->
-        if (!cursor.moveToFirst()) null else ContentUris.withAppendedId(collection, cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)))
-      }
-    } catch (error: Exception) {
-      Log.w(TAG, "$label name+relative query failed", error)
-      null
-    }
-  }
-
-  private fun relativePathFor(path: String): String {
-    val normalized = path.removePrefix("/storage/emulated/0/").removePrefix("/")
-    val slash = normalized.lastIndexOf('/')
-    if (slash < 0) return ""
-    return normalized.substring(0, slash + 1)
   }
 }
