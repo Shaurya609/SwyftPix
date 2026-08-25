@@ -93,7 +93,13 @@ export default function HomeScreen() {
 
   const filterItems = useCallback((source: MockMediaItem[], category: HomeCategory | null, reviewedIds: Set<string>) => {
     if (!category) return [];
-    return source.filter(item => matchesCategory(item, category) && !reviewedIds.has(item.id) && !sessionReviewedIdsRef.current.has(item.id));
+    const seen = new Set<string>();
+    return source.filter(item => {
+      if (seen.has(item.id)) return false;
+      if (!matchesCategory(item, category) || reviewedIds.has(item.id) || sessionReviewedIdsRef.current.has(item.id)) return false;
+      seen.add(item.id);
+      return true;
+    });
   }, []);
 
   const loadFirstPage = useCallback(async (category: HomeCategory) => {
@@ -160,9 +166,7 @@ export default function HomeScreen() {
         setDeletedItems(persistedTrash);
         if (selectedCategory) await loadFirstPage(selectedCategory);
         if (!fileAccessGranted && selectedCategory && isFileCategory(selectedCategory)) {
-          setItems([]);
-          setEndCursor(undefined);
-          setHasNextPage(false);
+          setItems([]); setEndCursor(undefined); setHasNextPage(false);
         }
       } catch (err) {
         if (!cancelled) console.error('[HomeScreen] Error refreshing on focus:', err);
@@ -192,7 +196,13 @@ export default function HomeScreen() {
         if (requestId !== loadRequestRef.current) return;
         setItems(prev => {
           const existingIds = new Set(prev.map(i => i.id));
-          return [...prev, ...result.items.filter(item => !existingIds.has(item.id) && !reviewedIds.has(item.id) && !sessionReviewedIdsRef.current.has(item.id))];
+          const pageIds = new Set<string>();
+          const additions = result.items.filter(item => {
+            if (existingIds.has(item.id) || pageIds.has(item.id) || reviewedIds.has(item.id) || sessionReviewedIdsRef.current.has(item.id)) return false;
+            pageIds.add(item.id);
+            return true;
+          });
+          return [...prev, ...additions];
         });
         setEndCursor(result.endCursor); setHasNextPage(result.hasNextPage);
       } catch (err) { console.error('[HomeScreen] Error loading more device media:', err); }
