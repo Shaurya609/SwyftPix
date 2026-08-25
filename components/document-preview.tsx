@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, PixelRatio, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { Image } from 'expo-image';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
-import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 import { MockMediaItem } from '../types/media';
 import { formatFileSize, formatDate } from '../utils/formatters';
@@ -18,7 +18,6 @@ function isPdfDocument(item: MockMediaItem) {
 
 function getPdfRenderWidth(width: number, thumbnail: boolean) {
   if (thumbnail) return 900;
-  // Render several times larger than the physical display so text remains sharp when zoomed.
   return Math.min(Math.max(Math.round(width * PixelRatio.get() * 2.5), 1800), 2400);
 }
 
@@ -139,22 +138,24 @@ export function DocumentPreview({ item, thumbnail = false }: DocumentPreviewProp
 
   if (isPdf && pageUri) {
     return (
-      <View style={styles.container}>
-        <View style={styles.viewerWrap}>
-          <GestureDetector gesture={gesture}>
-            <Animated.View style={styles.gestureArea}>
-              <AnimatedImage source={{ uri: pageUri }} style={[styles.page, pageAnimatedStyle]} contentFit="contain" />
-            </Animated.View>
-          </GestureDetector>
-          {loading ? <View style={styles.loadingOverlay}><ActivityIndicator size="large" color="#0A7EA4" /></View> : null}
-          {pageCount > 1 ? <View style={styles.pageControls}>
-            <TouchableOpacity style={styles.pageButton} disabled={pageIndex === 0 || loading} onPress={() => goToPage(pageIndex - 1)}><MaterialIcons name="chevron-left" size={28} color={pageIndex === 0 || loading ? '#666666' : '#FFFFFF'} /></TouchableOpacity>
-            <Text style={styles.pageLabel}>Page {pageIndex + 1} of {pageCount}</Text>
-            <TouchableOpacity style={styles.pageButton} disabled={pageIndex === pageCount - 1 || loading} onPress={() => goToPage(pageIndex + 1)}><MaterialIcons name="chevron-right" size={28} color={pageIndex === pageCount - 1 || loading ? '#666666' : '#FFFFFF'} /></TouchableOpacity>
-          </View> : null}
-          <View style={styles.zoomHint}><MaterialIcons name="zoom-in" size={16} color="#FFFFFF" /><Text style={styles.zoomHintText}>Pinch to zoom</Text></View>
+      <GestureHandlerRootView style={styles.root}>
+        <View style={styles.container}>
+          <View style={styles.viewerWrap}>
+            <GestureDetector gesture={gesture}>
+              <Animated.View style={styles.gestureArea}>
+                <AnimatedImage source={{ uri: pageUri }} style={[styles.page, pageAnimatedStyle]} contentFit="contain" />
+              </Animated.View>
+            </GestureDetector>
+            {loading ? <View style={styles.loadingOverlay}><ActivityIndicator size="large" color="#0A7EA4" /></View> : null}
+            {pageCount > 1 ? <View style={styles.pageControls}>
+              <TouchableOpacity style={styles.pageButton} disabled={pageIndex === 0 || loading} onPress={() => goToPage(pageIndex - 1)}><MaterialIcons name="chevron-left" size={28} color={pageIndex === 0 || loading ? '#666666' : '#FFFFFF'} /></TouchableOpacity>
+              <Text style={styles.pageLabel}>Page {pageIndex + 1} of {pageCount}</Text>
+              <TouchableOpacity style={styles.pageButton} disabled={pageIndex === pageCount - 1 || loading} onPress={() => goToPage(pageIndex + 1)}><MaterialIcons name="chevron-right" size={28} color={pageIndex === pageCount - 1 || loading ? '#666666' : '#FFFFFF'} /></TouchableOpacity>
+            </View> : null}
+            <View style={styles.zoomHint}><MaterialIcons name="zoom-in" size={16} color="#FFFFFF" /><Text style={styles.zoomHintText}>Pinch to zoom</Text></View>
+          </View>
         </View>
-      </View>
+      </GestureHandlerRootView>
     );
   }
 
@@ -170,6 +171,7 @@ export function DocumentPreview({ item, thumbnail = false }: DocumentPreviewProp
 }
 
 const styles = StyleSheet.create({
+  root: { flex: 1, width: '100%' },
   container: { flex: 1, width: '100%', backgroundColor: '#101010' },
   viewerWrap: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 12, overflow: 'hidden' },
   gestureArea: { width: '100%', height: '100%', justifyContent: 'center', alignItems: 'center' },
