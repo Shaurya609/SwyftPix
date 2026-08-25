@@ -21,6 +21,7 @@ type NativeMediaDeleteModule = {
   listSharedFiles(category: 'document' | 'archive' | 'apk' | 'other' | 'all', limit: number): NativeSharedFile[];
   renderPdfPage(uri: string, pageIndex: number, maxWidth: number): Promise<string | null>;
   getPdfPageCount(uri: string): Promise<number>;
+  readTextFile(uri: string, maxChars: number): Promise<string | null>;
 };
 
 export function canManageMedia(): boolean {
@@ -63,7 +64,6 @@ export function listSharedFiles(
 ): NativeSharedFile[] {
   const nativeModule = getNativeMediaDelete();
   if (!nativeModule) return [];
-
   try {
     return nativeModule.listSharedFiles(category === 'apks' ? 'apk' : category, limit);
   } catch (error) {
@@ -94,9 +94,19 @@ export async function getPdfPageCount(uri: string): Promise<number> {
   }
 }
 
+export async function readTextFile(uri: string, maxChars = 65536): Promise<string | null> {
+  const nativeModule = getNativeMediaDelete();
+  if (!nativeModule) return null;
+  try {
+    return await nativeModule.readTextFile(uri, Math.max(1024, Math.min(maxChars, 262144)));
+  } catch (error) {
+    console.warn('[SwyftPixMediaDelete] Text document read failed:', error);
+    return null;
+  }
+}
+
 function getNativeMediaDelete(): NativeMediaDeleteModule | null {
   if (Platform.OS !== 'android') return null;
-
   try {
     return requireNativeModule<NativeMediaDeleteModule>('SwyftPixMediaDelete');
   } catch (error) {
