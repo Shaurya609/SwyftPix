@@ -81,6 +81,14 @@ export const MediaReviewCard = forwardRef<MediaReviewCardRef, MediaReviewCardPro
   const translateX = useSharedValue(0);
   const translateY = useSharedValue(0);
 
+  useEffect(() => {
+    setIsPreviewVisible(false);
+    cancelAnimation(translateX);
+    cancelAnimation(translateY);
+    translateX.value = 0;
+    translateY.value = 0;
+  }, [item?.id]);
+
   useImperativeHandle(ref, () => ({
     swipeLeft: () => { if (!item) return; cancelAnimation(translateX); cancelAnimation(translateY); translateX.value = withTiming(-screenWidth * 1.5, { duration: 220 }, finished => { if (finished) runOnJS(onSwipeLeft)(item); }); translateY.value = withTiming(0, { duration: 160 }); },
     swipeRight: () => { if (!item) return; cancelAnimation(translateX); cancelAnimation(translateY); translateX.value = withTiming(screenWidth * 1.5, { duration: 220 }, finished => { if (finished) runOnJS(onSwipeRight)(item); }); translateY.value = withTiming(0, { duration: 160 }); },
@@ -125,16 +133,16 @@ export const MediaReviewCard = forwardRef<MediaReviewCardRef, MediaReviewCardPro
     <View style={styles.stackContainer}>
       <GestureDetector gesture={gesture}>
         <View style={styles.gestureContainer}>
-          {nextItem ? <View style={[styles.cardWrapper, styles.backCard]}><MediaPreviewContainer item={nextItem} isTop={false} /></View> : null}
+          {nextItem ? <View style={[styles.cardWrapper, styles.backCard]}><MediaPreviewContainer key={nextItem.id} item={nextItem} isTop={false} /></View> : null}
           <Animated.View style={[styles.cardWrapper, cardStyle]}>
-            <MediaPreviewContainer item={item} isTop />
+            <MediaPreviewContainer key={item.id} item={item} isTop />
             <Animated.View style={[styles.badgeContainer, styles.keepBadge, keepBadge]}><Text style={styles.badgeText}>KEEP</Text></Animated.View>
             <Animated.View style={[styles.badgeContainer, styles.deleteBadge, deleteBadge]}><Text style={styles.badgeText}>DELETE</Text></Animated.View>
-            <Modal visible={isPreviewVisible} animationType="slide" onRequestClose={() => setIsPreviewVisible(false)}>
+            <Modal key={item.id} visible={isPreviewVisible} animationType="slide" onRequestClose={() => setIsPreviewVisible(false)}>
               <View style={styles.modalContainer}>
                 <View style={styles.modalHeader}><View style={styles.modalMeta}><Text style={styles.modalTitle} numberOfLines={1}>{item.fileName}</Text><Text style={styles.modalSubtitle}>{(item.fileSize / (1024 * 1024)).toFixed(2)} MB</Text></View><TouchableOpacity style={styles.closeButton} onPress={() => setIsPreviewVisible(false)}><MaterialIcons name="close" size={26} color="#FFFFFF" /></TouchableOpacity></View>
                 <View style={styles.modalContent}>
-                  {item.fileType === 'video' ? <VideoPlayerView uri={item.uri} style={styles.fullVideo} /> : item.fileType === 'audio' ? <FullscreenAudioPreview uri={item.uri} /> : isDocument ? <DocumentPreview item={item} /> : <Image source={{ uri: item.uri }} style={styles.fullImage} contentFit="contain" />}
+                  {item.fileType === 'video' ? <VideoPlayerView key={`video-${item.id}`} uri={item.uri} style={styles.fullVideo} /> : item.fileType === 'audio' ? <FullscreenAudioPreview key={`audio-${item.id}`} uri={item.uri} /> : isDocument ? <DocumentPreview key={`document-${item.id}`} item={item} /> : <Image key={`image-${item.id}`} source={{ uri: item.uri }} style={styles.fullImage} contentFit="contain" />}
                 </View>
               </View>
             </Modal>
