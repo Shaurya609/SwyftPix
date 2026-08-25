@@ -48,9 +48,10 @@ export function DocumentPreview({ item, thumbnail = false }: DocumentPreviewProp
   useEffect(() => {
     let cancelled = false;
     setPageIndex(0);
+    setPageCount(0);
     setPageUri(null);
     resetZoom();
-    if (!isPdf) { setPageCount(0); setLoading(false); return; }
+    if (!isPdf) { setLoading(false); return; }
     setLoading(true);
     (async () => {
       const count = await getPdfPageCount(item.uri);
@@ -63,20 +64,25 @@ export function DocumentPreview({ item, thumbnail = false }: DocumentPreviewProp
       if (!cancelled) setLoading(false);
     })();
     return () => { cancelled = true; };
-  }, [item.uri, isPdf, thumbnail, width]);
+  }, [item.id, item.uri, isPdf, thumbnail, width]);
 
   useEffect(() => {
     if (thumbnail || !isPdf || pageCount <= 0) return;
     let cancelled = false;
     resetZoom();
+    setPageUri(null);
     setLoading(true);
     renderPdfPage(item.uri, pageIndex, getPdfRenderWidth(width, false)).then(uri => {
       if (cancelled) return;
       setPageUri(uri);
       setLoading(false);
+    }).catch(() => {
+      if (cancelled) return;
+      setPageUri(null);
+      setLoading(false);
     });
     return () => { cancelled = true; };
-  }, [item.uri, pageIndex, pageCount, thumbnail, isPdf, width]);
+  }, [item.id, item.uri, pageIndex, pageCount, thumbnail, isPdf, width]);
 
   const pinchGesture = useMemo(() => Gesture.Pinch()
     .onUpdate(event => {
