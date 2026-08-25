@@ -33,7 +33,9 @@ class SwyftPixPptxPreviewModule : Module() {
     } catch (error: Exception) {
       android.util.Log.w("SwyftPixPptxPreview", "PPTX visual rendering failed", error)
       null
-    } finally { temp.delete() }
+    } finally {
+      temp.delete()
+    }
   }
 
   private fun buildHtml(zip: ZipFile): String {
@@ -42,14 +44,19 @@ class SwyftPixPptxPreviewModule : Module() {
       .filter { !it.isDirectory && it.name.matches(Regex("ppt/slides/slide\\d+\\.xml")) }
       .sortedBy { Regex("slide(\\d+)\\.xml").find(it.name)?.groupValues?.get(1)?.toIntOrNull() ?: 0 }
       .toList()
+
     if (entries.isEmpty()) return ""
 
-    val slides = entries.mapIndexed { index, entry -> renderSlide(zip, entry.name, index + 1, size) }.joinToString("")
+    val slides = entries.mapIndexed { index, entry ->
+      renderSlide(zip, entry.name, index + 1, size)
+    }.joinToString("")
+
     return """
       <!doctype html><html><head>
       <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5, user-scalable=yes" />
       <style>
-        *{box-sizing:border-box}html,body{margin:0;padding:0;background:#242424}
+        *{box-sizing:border-box}
+        html,body{margin:0;padding:0;background:#242424}
         body{padding:12px 0 28px;font-family:Arial,Helvetica,sans-serif}
         .slide{position:relative;width:min(1100px,calc(100vw - 16px));aspect-ratio:${size.width}/${size.height};margin:0 auto 16px;background:#fff;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.38)}
         .shape{position:absolute;overflow:hidden;white-space:pre-wrap;word-break:break-word}
@@ -64,7 +71,7 @@ class SwyftPixPptxPreviewModule : Module() {
     val rels = readRelationships(zip, slideName)
     val out = StringBuilder("<section class=\"slide\">")
 
-    extractSolidFill(Regex("<p:bg\\b.*?</p:bg>", setOf(RegexOption.DOT_MATCHES_ALL)).find(xml)?.value.orEmpty())?.let {
+    extractShapeBackgroundFill(Regex("<p:bg\\b.*?</p:bg>", setOf(RegexOption.DOT_MATCHES_ALL)).find(xml)?.value.orEmpty())?.let {
       out.append("<div style=\"position:absolute;inset:0;background:$it\"></div>")
     }
 
@@ -73,7 +80,13 @@ class SwyftPixPptxPreviewModule : Module() {
       val bounds = extractBounds(shape, size) ?: return@forEach
       val text = extractText(shape)
       if (text.isBlank()) return@forEach
-      val fill = extractSolidFill(shape)
+
+      // IMPORTANT: shape fill and text color live in different XML branches.
+      // The old implementation searched the entire shape for <a:solidFill>,
+      // which often found the text color and incorrectly painted the text box
+      // with that color. That produced the large dark rectangles seen in the
+      // PPTX preview.
+      val fill = extractShapeFill(shape)
       val fontSize = extractFontSize(shape)
       val color = extractTextColor(shape) ?: "#171717"
       val bold = Regex("<a:rPr\\b[^>]*b=\"1\"|<a:defRPr\\b[^>]*b=\"1\"").containsMatchIn(shape)
@@ -83,15 +96,25 @@ class SwyftPixPptxPreviewModule : Module() {
         shape.contains("algn=\"r\"") -> "right"
         else -> "left"
       }
+
+      // PPT font sizes are expressed in points. The slide is rendered at a
+      // variable CSS width, so express the font size relative to the slide
+      // viewport instead of using a fixed px value. This prevents text from
+      // becoming huge when the slide is displayed on a phone.
+      val responsiveFont = (fontSize * 1.333 / 11.0).coerceAtLeast(0.9)
       val style = buildString {
         append("left:${bounds.x}%;top:${bounds.y}%;width:${bounds.w}%;height:${bounds.h}%;")
-        append("padding:2px 4px;color:$color;font-size:${fontSize}px;line-height:1.15;text-align:$align;")
+        append("padding:2px 4px;color:$color;font-size:${"%.3f".format(java.util.Locale.US, responsiveFont)}vw;line-height:1.15;text-align:$align;")
         if (fill != null) append("background:$fill;")
         if (bold) append("font-weight:700;")
         if (italic) append("font-style:italic;")
       }
-      out.append("<div class=\"shape\" style=\"").append(style).append("\">")
-        .append(escapeHtml(text)).append("</div>")
+
+      out.append("<div class=\"shape\" style=\"")
+        .append(style)
+        .append("\">")
+        .append(escapeHtml(text))
+        .append("</div>")
     }
 
     Regex("<p:pic\\b.*?</p:pic>", setOf(RegexOption.DOT_MATCHES_ALL)).findAll(xml).forEach { match ->
@@ -135,8 +158,23 @@ class SwyftPixPptxPreviewModule : Module() {
     )
   }
 
-  private fun extractText(xml: String): String = Regex("<a:t\\b[^>]*>(.*?)</a:t>", setOf(RegexOption.DOT_MATCHES_ALL)).findAll(xml)
-    .map { xmlUnescape(stripXml(it.groupValues[1])) }.joinToString(" ").trim()
+  private fun extractText(xml: String): String {
+    val paragraphs = Regex("<a:p\\b.*?</a:p>", setOf(RegexOption.DOT_MATCHES_ALL)).findAll(xml)
+      .map { paragraph ->
+        Regex("<a:t\\b[^>]*>(.*?)</a:t>", setOf(RegexOption.DOT_MATCHES_ALL)).findAll(paragraph.value)
+          .map { xmlUnescape(stripXml(it.groupValues[1])) }
+          .joinToString("")
+      }
+      .filter { it.isNotBlank() }
+      .toList()
+
+    return if (paragraphs.isNotEmpty()) paragraphs.joinToString("\n") else {
+      Regex("<a:t\\b[^>]*>(.*?)</a:t>", setOf(RegexOption.DOT_MATCHES_ALL)).findAll(xml)
+        .map { xmlUnescape(stripXml(it.groupValues[1])) }
+        .joinToString("")
+        .trim()
+    }
+  }
 
   private fun extractFontSize(xml: String): Int {
     val raw = Regex("<a:rPr[^>]*sz=\"(\\d+)\"").find(xml)?.groupValues?.get(1)?.toIntOrNull()
@@ -149,12 +187,27 @@ class SwyftPixPptxPreviewModule : Module() {
     return extractSolidFill(runProps)
   }
 
+  private fun extractShapeFill(xml: String): String? {
+    val shapeProperties = Regex("<p:spPr\\b.*?</p:spPr>", setOf(RegexOption.DOT_MATCHES_ALL)).find(xml)?.value ?: return null
+    return extractSolidFill(shapeProperties)
+  }
+
+  private fun extractShapeBackgroundFill(xml: String): String? = extractSolidFill(xml)
+
   private fun extractSolidFill(xml: String): String? {
     val solid = Regex("<a:solidFill\\b.*?</a:solidFill>", setOf(RegexOption.DOT_MATCHES_ALL)).find(xml)?.value ?: return null
     Regex("<a:srgbClr[^>]*val=\"([0-9A-Fa-f]{6})\"").find(solid)?.groupValues?.get(1)?.let { return "#$it" }
     return when (Regex("<a:schemeClr[^>]*val=\"([^\"]+)\"").find(solid)?.groupValues?.get(1)?.lowercase()) {
-      "dk1", "tx1" -> "#000000"; "lt1", "bg1" -> "#FFFFFF"; "dk2", "tx2" -> "#1F497D"; "lt2", "bg2" -> "#EEECE1"
-      "accent1" -> "#4472C4"; "accent2" -> "#ED7D31"; "accent3" -> "#A5A5A5"; "accent4" -> "#FFC000"; "accent5" -> "#5B9BD5"; "accent6" -> "#70AD47"
+      "dk1", "tx1" -> "#000000"
+      "lt1", "bg1" -> "#FFFFFF"
+      "dk2", "tx2" -> "#1F497D"
+      "lt2", "bg2" -> "#EEECE1"
+      "accent1" -> "#4472C4"
+      "accent2" -> "#ED7D31"
+      "accent3" -> "#A5A5A5"
+      "accent4" -> "#FFC000"
+      "accent5" -> "#5B9BD5"
+      "accent6" -> "#70AD47"
       else -> null
     }
   }
@@ -164,20 +217,44 @@ class SwyftPixPptxPreviewModule : Module() {
     val entry = zip.getEntry(relPath) ?: return emptyMap()
     val xml = zip.getInputStream(entry).bufferedReader().readText()
     return Regex("<Relationship\\b[^>]*Id=\"([^\"]+)\"[^>]*Target=\"([^\"]+)\"", RegexOption.DOT_MATCHES_ALL)
-      .findAll(xml).associate { it.groupValues[1] to it.groupValues[2] }
+      .findAll(xml)
+      .associate { it.groupValues[1] to it.groupValues[2] }
   }
 
   private fun normalizeZipPath(path: String): String {
     val output = ArrayDeque<String>()
-    path.replace('\\', '/').split('/').forEach { part -> when (part) { "", "." -> Unit; ".." -> if (output.isNotEmpty()) output.removeLast(); else -> output.addLast(part) } }
+    path.replace('\\', '/').split('/').forEach { part ->
+      when (part) {
+        "", "." -> Unit
+        ".." -> if (output.isNotEmpty()) output.removeLast()
+        else -> output.addLast(part)
+      }
+    }
     return output.joinToString("/")
   }
 
   private fun mimeFor(path: String): String = when (path.substringAfterLast('.').lowercase()) {
-    "png" -> "image/png"; "jpg", "jpeg" -> "image/jpeg"; "gif" -> "image/gif"; "svg" -> "image/svg+xml"; "webp" -> "image/webp"; else -> "application/octet-stream"
+    "png" -> "image/png"
+    "jpg", "jpeg" -> "image/jpeg"
+    "gif" -> "image/gif"
+    "svg" -> "image/svg+xml"
+    "webp" -> "image/webp"
+    else -> "application/octet-stream"
   }
 
   private fun stripXml(value: String): String = value.replace(Regex("<[^>]+>"), "")
-  private fun xmlUnescape(value: String): String = value.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&apos;", "'")
-  private fun escapeHtml(value: String): String = value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;").replace("'", "&#39;")
+
+  private fun xmlUnescape(value: String): String = value
+    .replace("&amp;", "&")
+    .replace("&lt;", "<")
+    .replace("&gt;", ">")
+    .replace("&quot;", "\"")
+    .replace("&apos;", "'")
+
+  private fun escapeHtml(value: String): String = value
+    .replace("&", "&amp;")
+    .replace("<", "&lt;")
+    .replace(">", "&gt;")
+    .replace("\"", "&quot;")
+    .replace("'", "&#39;")
 }
