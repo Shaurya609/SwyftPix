@@ -111,7 +111,7 @@ class SwyftPixPptxPreviewModule : Module() {
   }
 
   private fun readSlideSize(zip: ZipFile): SlideSize {
-    val entry = zip.getEntry("ppt/presentation.xml") ?: return SlideSize(13.333, 7.5)
+    val entry = zip.getEntry("ppt/presentation.xml") ?: return SlideSize(12192000.0, 6858000.0)
     val xml = zip.getInputStream(entry).bufferedReader().readText()
     val match = Regex("<p:sldSz[^>]*cx=\"(\\d+)\"[^>]*cy=\"(\\d+)\"").find(xml)
     val x = match?.groupValues?.get(1)?.toDoubleOrNull() ?: 12192000.0
@@ -127,7 +127,12 @@ class SwyftPixPptxPreviewModule : Module() {
     val y = off.groupValues[2].toDoubleOrNull() ?: return null
     val w = ext.groupValues[1].toDoubleOrNull() ?: return null
     val h = ext.groupValues[2].toDoubleOrNull() ?: return null
-    return Bounds(x / size.width, y / size.height, w / size.width, h / size.height)
+    return Bounds(
+      x / size.width * 100.0,
+      y / size.height * 100.0,
+      w / size.width * 100.0,
+      h / size.height * 100.0
+    )
   }
 
   private fun extractText(xml: String): String = Regex("<a:t\\b[^>]*>(.*?)</a:t>", setOf(RegexOption.DOT_MATCHES_ALL)).findAll(xml)
