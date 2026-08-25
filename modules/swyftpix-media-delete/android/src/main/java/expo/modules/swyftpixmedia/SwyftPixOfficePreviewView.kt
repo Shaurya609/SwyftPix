@@ -19,6 +19,7 @@ class SwyftPixOfficePreviewView(context: Context, appContext: AppContext) : Expo
       domStorageEnabled = false
       allowFileAccess = false
       allowContentAccess = false
+      setSupportZoom(true)
       builtInZoomControls = false
       displayZoomControls = false
       loadWithOverviewMode = false
