@@ -7,7 +7,8 @@ import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-na
 import { MockMediaItem } from '../types/media';
 import { formatFileSize, formatDate } from '../utils/formatters';
 import { getPdfPageCount, readTextFile, renderPdfPage } from '../modules/swyftpix-media-delete';
-import { readOfficeDocument } from '../modules/swyftpix-media-delete/office-preview';
+import { readOfficeDocument, renderDocxHtml } from '../modules/swyftpix-media-delete/office-preview';
+import SwyftPixOfficePreviewView from '../modules/swyftpix-media-delete/src/SwyftPixOfficePreviewView';
 
 interface DocumentPreviewProps { item: MockMediaItem; thumbnail?: boolean; }
 const AnimatedImage = Animated.createAnimatedComponent(Image);
@@ -58,6 +59,7 @@ export function DocumentPreview({ item, thumbnail = false }: DocumentPreviewProp
   const [pageUri, setPageUri] = useState<string | null>(null);
   const [textContent, setTextContent] = useState<string | null>(null);
   const [officeContent, setOfficeContent] = useState<string | null>(null);
+  const [docxHtml, setDocxHtml] = useState<string | null>(null);
   const [loading, setLoading] = useState(isPdf || isText || isOffice);
 
   const scale = useSharedValue(1);
@@ -83,19 +85,32 @@ export function DocumentPreview({ item, thumbnail = false }: DocumentPreviewProp
     setPageUri(null);
     setTextContent(null);
     setOfficeContent(null);
+    setDocxHtml(null);
     setLoading(isPdf || isText || isOffice);
     resetZoom();
 
     if (isOffice && officeType) {
-      readOfficeDocument(item.uri, officeType, thumbnail ? 5000 : 300000).then(content => {
-        if (cancelled) return;
-        setOfficeContent(content);
-        setLoading(false);
-      }).catch(() => {
-        if (cancelled) return;
-        setOfficeContent(null);
-        setLoading(false);
-      });
+      if (officeType === 'docx') {
+        renderDocxHtml(item.uri).then(html => {
+          if (cancelled) return;
+          setDocxHtml(html);
+          setLoading(false);
+        }).catch(() => {
+          if (cancelled) return;
+          setDocxHtml(null);
+          setLoading(false);
+        });
+      } else {
+        readOfficeDocument(item.uri, officeType, thumbnail ? 5000 : 300000).then(content => {
+          if (cancelled) return;
+          setOfficeContent(content);
+          setLoading(false);
+        }).catch(() => {
+          if (cancelled) return;
+          setOfficeContent(null);
+          setLoading(false);
+        });
+      }
       return () => { cancelled = true; };
     }
 
@@ -185,6 +200,7 @@ export function DocumentPreview({ item, thumbnail = false }: DocumentPreviewProp
   if (thumbnail) {
     if (isPdf && pageUri) return <View style={styles.thumbnailContainer}><Image source={{ uri: pageUri }} style={styles.thumbnailPage} contentFit="contain" /></View>;
     if (isText && textContent) return <View style={styles.thumbnailContainer}><View style={styles.textThumbnail}><Text style={styles.textThumbnailContent} numberOfLines={7}>{textContent}</Text></View></View>;
+    if (isOffice && officeType === 'docx' && docxHtml) return <View style={styles.nativeOfficeThumbnail}><SwyftPixOfficePreviewView html={docxHtml} style={StyleSheet.absoluteFill} /></View>;
     if (isOffice && officeContent) return <View style={styles.thumbnailContainer}><View style={styles.officeThumbnail}><Text style={styles.officeThumbnailTitle}>{officeLabel(officeType!)}</Text><Text style={styles.officeThumbnailContent} numberOfLines={8}>{officeContent}</Text></View></View>;
     if ((isPdf || isText || isOffice) && loading) return <View style={styles.thumbnailContainer}><ActivityIndicator size="large" color="#0A7EA4" /></View>;
     return <View style={styles.thumbnailFallback}><View style={[styles.iconCircle, isPdf ? styles.pdfCircle : styles.documentCircle]}><MaterialIcons name={isOffice ? officeIcon(officeType!) as any : isPdf ? 'picture-as-pdf' : isText ? 'article' : 'description'} size={56} color="#FFFFFF" /></View><Text style={styles.thumbnailLabel}>{isOffice ? officeLabel(officeType!) : isPdf ? 'PDF' : isText ? 'TEXT' : 'DOCUMENT'}</Text></View>;
@@ -192,6 +208,10 @@ export function DocumentPreview({ item, thumbnail = false }: DocumentPreviewProp
 
   if (isPdf && pageUri) {
     return <GestureHandlerRootView style={styles.root}><View style={styles.container}><View style={styles.viewerWrap}><GestureDetector gesture={gesture}><Animated.View style={styles.gestureArea}><AnimatedImage source={{ uri: pageUri }} style={[styles.page, pageAnimatedStyle]} contentFit="contain" /></Animated.View></GestureDetector>{loading ? <View style={styles.loadingOverlay}><ActivityIndicator size="large" color="#0A7EA4" /></View> : null}{pageCount > 1 ? <View style={styles.pageControls}><TouchableOpacity style={styles.pageButton} disabled={pageIndex === 0 || loading} onPress={() => goToPage(pageIndex - 1)}><MaterialIcons name="chevron-left" size={28} color={pageIndex === 0 || loading ? '#666666' : '#FFFFFF'} /></TouchableOpacity><Text style={styles.pageLabel}>Page {pageIndex + 1} of {pageCount}</Text><TouchableOpacity style={styles.pageButton} disabled={pageIndex === pageCount - 1 || loading} onPress={() => goToPage(pageIndex + 1)}><MaterialIcons name="chevron-right" size={28} color={pageIndex === pageCount - 1 || loading ? '#666666' : '#FFFFFF'} /></TouchableOpacity></View> : null}<View style={styles.zoomHint}><MaterialIcons name="zoom-in" size={16} color="#FFFFFF" /><Text style={styles.zoomHintText}>Pinch to zoom</Text></View></View></View></GestureHandlerRootView>;
+  }
+
+  if (isOffice && officeType === 'docx' && docxHtml) {
+    return <View style={styles.nativeOfficeViewer}><SwyftPixOfficePreviewView html={docxHtml} style={StyleSheet.absoluteFill} /></View>;
   }
 
   if (isText && textContent) return <View style={styles.textViewer}><ScrollView contentContainerStyle={styles.textScrollContent} showsVerticalScrollIndicator><Text style={styles.textContent}>{textContent}</Text></ScrollView></View>;
@@ -210,7 +230,7 @@ const styles = StyleSheet.create({
   pageControls: { position: 'absolute', bottom: 18, alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: 'rgba(0,0,0,0.82)', paddingHorizontal: 8, paddingVertical: 7, borderRadius: 22 }, pageButton: { width: 40, height: 40, borderRadius: 20, justifyContent: 'center', alignItems: 'center' }, pageLabel: { color: '#FFFFFF', fontSize: 13, fontWeight: '700', minWidth: 90, textAlign: 'center' },
   zoomHint: { position: 'absolute', top: 16, alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(0,0,0,0.68)', paddingHorizontal: 12, paddingVertical: 7, borderRadius: 18 }, zoomHintText: { color: '#FFFFFF', fontSize: 12, fontWeight: '600' },
   genericViewer: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 28, backgroundColor: '#101010' }, iconCircle: { width: 150, height: 150, borderRadius: 75, justifyContent: 'center', alignItems: 'center', marginBottom: 22 }, pdfCircle: { backgroundColor: '#FF3B30' }, documentCircle: { backgroundColor: '#3478F6' }, typeLabel: { color: '#FFFFFF', fontSize: 13, fontWeight: '800', letterSpacing: 1.8, marginBottom: 12 }, fileName: { color: '#FFFFFF', fontSize: 18, fontWeight: '700', textAlign: 'center', maxWidth: 340 }, metaRow: { flexDirection: 'row', alignItems: 'center', marginTop: 12 }, meta: { color: '#B0B0B0', fontSize: 13 }, dot: { width: 4, height: 4, borderRadius: 2, backgroundColor: '#777777', marginHorizontal: 9 }, safeNote: { color: '#777777', fontSize: 12, lineHeight: 18, textAlign: 'center', maxWidth: 330, marginTop: 20 },
-  thumbnailContainer: { flex: 1, width: '100%', height: '100%', backgroundColor: '#EDEDED', justifyContent: 'center', alignItems: 'center', overflow: 'hidden' }, thumbnailPage: { width: '100%', height: '100%' }, thumbnailFallback: { alignItems: 'center', justifyContent: 'center' }, thumbnailLabel: { color: '#333333', fontSize: 14, fontWeight: '800', letterSpacing: 2, marginTop: 4 },
+  thumbnailContainer: { flex: 1, width: '100%', height: '100%', backgroundColor: '#EDEDED', justifyContent: 'center', alignItems: 'center', overflow: 'hidden' }, thumbnailPage: { width: '100%', height: '100%' }, nativeOfficeThumbnail: { flex: 1, width: '100%', backgroundColor: '#EDEDED', overflow: 'hidden' }, nativeOfficeViewer: { flex: 1, backgroundColor: '#ECECEC', overflow: 'hidden' }, thumbnailFallback: { alignItems: 'center', justifyContent: 'center' }, thumbnailLabel: { color: '#333333', fontSize: 14, fontWeight: '800', letterSpacing: 2, marginTop: 4 },
   textThumbnail: { width: '92%', height: '88%', backgroundColor: '#FFFFFF', padding: 10, borderRadius: 4, overflow: 'hidden' }, textThumbnailContent: { color: '#222222', fontSize: 7, lineHeight: 10, fontFamily: 'monospace' },
   officeThumbnail: { width: '92%', height: '88%', backgroundColor: '#FFFFFF', padding: 10, borderRadius: 4, overflow: 'hidden' }, officeThumbnailTitle: { color: '#2457A6', fontSize: 10, fontWeight: '900', marginBottom: 7 }, officeThumbnailContent: { color: '#333333', fontSize: 7, lineHeight: 10, fontFamily: 'monospace' },
   textViewer: { flex: 1, backgroundColor: '#101010' }, textScrollContent: { padding: 18, paddingBottom: 40 }, textContent: { color: '#F2F2F2', fontSize: 14, lineHeight: 21, fontFamily: 'monospace' },
