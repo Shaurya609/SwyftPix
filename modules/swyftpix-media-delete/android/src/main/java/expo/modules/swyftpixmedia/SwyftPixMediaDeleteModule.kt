@@ -375,21 +375,4 @@ class SwyftPixMediaDeleteModule : Module() {
     }
   }
 
-  private fun findInCollection(resolver: android.content.ContentResolver, collection: Uri, label: String, fileName: String, relativePath: String): Uri? {
-    return try {
-      resolver.query(collection, arrayOf(MediaStore.MediaColumns._ID, MediaStore.MediaColumns.DISPLAY_NAME, MediaStore.MediaColumns.RELATIVE_PATH), "${MediaStore.MediaColumns.DISPLAY_NAME} = ? AND ${MediaStore.MediaColumns.RELATIVE_PATH} = ?", arrayOf(fileName, relativePath), null)?.use { cursor ->
-        if (!cursor.moveToFirst()) null else ContentUris.withAppendedId(collection, cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)))
-      }
-    } catch (error: Exception) {
-      Log.w(TAG, "$label name+relative query failed", error)
-      null
-    }
-  }
-
-  private fun relativePathFor(path: String): String {
-    val normalized = path.removePrefix("/storage/emulated/0/").removePrefix("/")
-    val slash = normalized.lastIndexOf('/')
-    if (slash < 0) return ""
-    return normalized.substring(0, slash + 1)
-  }
 }
