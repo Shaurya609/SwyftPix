@@ -10,7 +10,6 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
-import android.os.ParcelFileDescriptor
 import android.provider.MediaStore
 import android.provider.Settings
 import android.util.Log
@@ -137,8 +136,7 @@ class SwyftPixMediaDeleteModule : Module() {
   private fun renderPdfPage(uriString: String, pageIndex: Int, maxWidth: Int): String? {
     if (!uriString.startsWith("content://")) return null
     return try {
-      val uri = Uri.parse(uriString)
-      context.contentResolver.openFileDescriptor(uri, "r")?.use { descriptor ->
+      context.contentResolver.openFileDescriptor(Uri.parse(uriString), "r")?.use { descriptor ->
         PdfRenderer(descriptor).use { renderer ->
           if (pageIndex !in 0 until renderer.pageCount) return null
           renderer.openPage(pageIndex).use { page ->
@@ -313,5 +311,23 @@ class SwyftPixMediaDeleteModule : Module() {
       Log.w(TAG, "content URI safety validation failed", error)
       null
     }
+  }
+
+  private fun findInCollection(resolver: android.content.ContentResolver, collection: Uri, label: String, fileName: String, relativePath: String): Uri? {
+    return try {
+      resolver.query(collection, arrayOf(MediaStore.MediaColumns._ID, MediaStore.MediaColumns.DISPLAY_NAME, MediaStore.MediaColumns.RELATIVE_PATH), "${MediaStore.MediaColumns.DISPLAY_NAME} = ? AND ${MediaStore.MediaColumns.RELATIVE_PATH} = ?", arrayOf(fileName, relativePath), null)?.use { cursor ->
+        if (!cursor.moveToFirst()) null else ContentUris.withAppendedId(collection, cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)))
+      }
+    } catch (error: Exception) {
+      Log.w(TAG, "$label name+relative query failed", error)
+      null
+    }
+  }
+
+  private fun relativePathFor(path: String): String {
+    val normalized = path.removePrefix("/storage/emulated/0/").removePrefix("/")
+    val slash = normalized.lastIndexOf('/')
+    if (slash < 0) return ""
+    return normalized.substring(0, slash + 1)
   }
 }
