@@ -1,50 +1,35 @@
-# Welcome to your Expo app 👋
+# SwyftPix
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+SwyftPix is an Expo/React Native application for reviewing, organizing, previewing, and managing media and documents on an Android device.
 
-## Get started
+## Project state
 
-1. Install dependencies
+This repository uses a living project-state document to track what is working, what is being developed, known issues, testing status, and the next concrete workstream:
 
-   ```bash
-   npm install
-   ```
+**[PROJECT_STATE.md](PROJECT_STATE.md)**
 
-2. Start the app
+Update it as the project evolves rather than treating it as a static README.
 
-   ```bash
-   npx expo start
-   ```
+## Development
 
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
+Install dependencies:
 
 ```bash
-npm run reset-project
+npm install
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+Start the development client:
 
-## Learn more
+```bash
+npx expo start --dev-client
+```
 
-To learn more about developing your project with Expo, look at the following resources:
+For native Android changes, rebuild the development application:
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+```bash
+npx expo run:android
+```
 
-## Join the community
+## Repository
 
-Join our community of developers creating universal apps.
-
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+The active development branch for the current retention/document-preview workstream is `phase-2d-retention`.
