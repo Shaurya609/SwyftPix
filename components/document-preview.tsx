@@ -1,12 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, PixelRatio, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import { ActivityIndicator, PixelRatio, ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { Image } from 'expo-image';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 import { MockMediaItem } from '../types/media';
 import { formatFileSize, formatDate } from '../utils/formatters';
-import { getPdfPageCount, renderPdfPage } from '../modules/swyftpix-media-delete';
+import { getPdfPageCount, readTextFile, renderPdfPage } from '../modules/swyftpix-media-delete';
 
 interface DocumentPreviewProps { item: MockMediaItem; thumbnail?: boolean; }
 
@@ -14,6 +14,12 @@ const AnimatedImage = Animated.createAnimatedComponent(Image);
 
 function isPdfDocument(item: MockMediaItem) {
   return item.fileType === 'pdf' || item.fileName.toLowerCase().endsWith('.pdf') || item.mimeType?.toLowerCase() === 'application/pdf';
+}
+
+function isTextDocument(item: MockMediaItem) {
+  const name = item.fileName.toLowerCase();
+  const mime = item.mimeType?.toLowerCase() ?? '';
+  return ['.txt', '.csv', '.log', '.json', '.xml'].some(ext => name.endsWith(ext)) || mime.startsWith('text/') || mime === 'application/json' || mime === 'application/xml';
 }
 
 function getPdfRenderWidth(width: number, thumbnail: boolean) {
@@ -24,10 +30,12 @@ function getPdfRenderWidth(width: number, thumbnail: boolean) {
 export function DocumentPreview({ item, thumbnail = false }: DocumentPreviewProps) {
   const { width } = useWindowDimensions();
   const isPdf = isPdfDocument(item);
+  const isText = isTextDocument(item);
   const [pageCount, setPageCount] = useState(0);
   const [pageIndex, setPageIndex] = useState(0);
   const [pageUri, setPageUri] = useState<string | null>(null);
-  const [loading, setLoading] = useState(isPdf);
+  const [textContent, setTextContent] = useState<string | null>(null);
+  const [loading, setLoading] = useState(isPdf || isText);
 
   const scale = useSharedValue(1);
   const savedScale = useSharedValue(1);
@@ -50,8 +58,28 @@ export function DocumentPreview({ item, thumbnail = false }: DocumentPreviewProp
     setPageIndex(0);
     setPageCount(0);
     setPageUri(null);
+    setTextContent(null);
     resetZoom();
-    if (!isPdf) { setLoading(false); return; }
+
+    if (isText) {
+      setLoading(true);
+      readTextFile(item.uri, thumbnail ? 700 : 131072).then(text => {
+        if (cancelled) return;
+        setTextContent(text);
+        setLoading(false);
+      }).catch(() => {
+        if (cancelled) return;
+        setTextContent(null);
+        setLoading(false);
+      });
+      return () => { cancelled = true; };
+    }
+
+    if (!isPdf) {
+      setLoading(false);
+      return () => { cancelled = true; };
+    }
+
     setLoading(true);
     (async () => {
       const count = await getPdfPageCount(item.uri);
@@ -64,7 +92,7 @@ export function DocumentPreview({ item, thumbnail = false }: DocumentPreviewProp
       if (!cancelled) setLoading(false);
     })();
     return () => { cancelled = true; };
-  }, [item.id, item.uri, isPdf, thumbnail, width]);
+  }, [item.id, item.uri, isPdf, isText, thumbnail, width]);
 
   useEffect(() => {
     if (thumbnail || !isPdf || pageCount <= 0) return;
@@ -136,8 +164,9 @@ export function DocumentPreview({ item, thumbnail = false }: DocumentPreviewProp
     return (
       <View style={styles.thumbnailContainer}>
         {isPdf && pageUri ? <Image source={{ uri: pageUri }} style={styles.thumbnailPage} contentFit="contain" /> : null}
-        {isPdf && loading ? <View style={styles.thumbnailLoading}><ActivityIndicator size="large" color="#0A7EA4" /></View> : null}
-        {!isPdf || (!pageUri && !loading) ? <View style={styles.thumbnailFallback}><View style={[styles.iconCircle, isPdf ? styles.pdfCircle : styles.documentCircle]}><MaterialIcons name={isPdf ? 'picture-as-pdf' : 'description'} size={56} color="#FFFFFF" /></View><Text style={styles.thumbnailLabel}>{isPdf ? 'PDF' : 'DOCUMENT'}</Text></View> : null}
+        {isText && textContent ? <View style={styles.textThumbnail}><Text style={styles.textThumbnailContent} numberOfLines={7}>{textContent}</Text></View> : null}
+        {(isPdf || isText) && loading ? <View style={styles.thumbnailLoading}><ActivityIndicator size="large" color="#0A7EA4" /></View> : null}
+        {(!isPdf && !isText) || ((isPdf || isText) && !pageUri && !textContent && !loading) ? <View style={styles.thumbnailFallback}><View style={[styles.iconCircle, isPdf ? styles.pdfCircle : styles.documentCircle]}><MaterialIcons name={isPdf ? 'picture-as-pdf' : isText ? 'article' : 'description'} size={56} color="#FFFFFF" /></View><Text style={styles.thumbnailLabel}>{isPdf ? 'PDF' : isText ? 'TEXT' : 'DOCUMENT'}</Text></View> : null}
       </View>
     );
   }
@@ -165,13 +194,24 @@ export function DocumentPreview({ item, thumbnail = false }: DocumentPreviewProp
     );
   }
 
+  if (isText && textContent) {
+    return (
+      <View style={styles.textViewer}>
+        <ScrollView contentContainerStyle={styles.textScrollContent} showsVerticalScrollIndicator>
+          <Text style={styles.textContent}>{textContent}</Text>
+        </ScrollView>
+        {loading ? <View style={styles.loadingOverlay}><ActivityIndicator size="large" color="#0A7EA4" /></View> : null}
+      </View>
+    );
+  }
+
   return (
     <View style={styles.genericViewer}>
-      {isPdf && loading ? <ActivityIndicator size="large" color="#0A7EA4" /> : <View style={[styles.iconCircle, isPdf ? styles.pdfCircle : styles.documentCircle]}><MaterialIcons name={isPdf ? 'picture-as-pdf' : 'description'} size={68} color="#FFFFFF" /></View>}
-      <Text style={styles.typeLabel}>{isPdf ? 'PDF DOCUMENT' : 'DOCUMENT'}</Text>
+      {loading ? <ActivityIndicator size="large" color="#0A7EA4" /> : <View style={[styles.iconCircle, isPdf ? styles.pdfCircle : styles.documentCircle]}><MaterialIcons name={isPdf ? 'picture-as-pdf' : isText ? 'article' : 'description'} size={68} color="#FFFFFF" /></View>}
+      <Text style={styles.typeLabel}>{isPdf ? 'PDF DOCUMENT' : isText ? 'TEXT DOCUMENT' : 'DOCUMENT'}</Text>
       <Text style={styles.fileName} numberOfLines={3}>{item.fileName}</Text>
       <View style={styles.metaRow}><Text style={styles.meta}>{formatFileSize(item.fileSize)}</Text><View style={styles.dot} /><Text style={styles.meta}>{formatDate(item.dateCreated)}</Text></View>
-      <Text style={styles.safeNote}>{isPdf ? (loading ? 'Preparing an in-app preview…' : 'PDF preview could not be rendered on this device.') : 'In-app preview is currently available for PDF documents. This file can still be opened with a compatible device app.'}</Text>
+      <Text style={styles.safeNote}>{isPdf ? (loading ? 'Preparing an in-app preview…' : 'PDF preview could not be rendered on this device.') : isText ? (loading ? 'Preparing an in-app preview…' : 'This text file could not be read on the device.') : 'In-app preview is currently available for PDF and text documents. This file can still be opened with a compatible device app.'}</Text>
     </View>
   );
 }
@@ -196,6 +236,13 @@ const styles = StyleSheet.create({
   metaRow: { flexDirection: 'row', alignItems: 'center', marginTop: 12 }, meta: { color: '#B0B0B0', fontSize: 13 }, dot: { width: 4, height: 4, borderRadius: 2, backgroundColor: '#777777', marginHorizontal: 9 },
   safeNote: { color: '#777777', fontSize: 12, lineHeight: 18, textAlign: 'center', maxWidth: 330, marginTop: 20 },
   thumbnailContainer: { flex: 1, width: '100%', height: '100%', backgroundColor: '#EDEDED', justifyContent: 'center', alignItems: 'center', overflow: 'hidden' },
-  thumbnailPage: { width: '100%', height: '100%' }, thumbnailLoading: { ...StyleSheet.absoluteFillObject, justifyContent: 'center', alignItems: 'center', backgroundColor: '#EDEDED' },
-  thumbnailFallback: { alignItems: 'center', justifyContent: 'center' }, thumbnailLabel: { color: '#333333', fontSize: 14, fontWeight: '800', letterSpacing: 2, marginTop: 4 },
+  thumbnailPage: { width: '100%', height: '100%' },
+  thumbnailLoading: { ...StyleSheet.absoluteFillObject, justifyContent: 'center', alignItems: 'center', backgroundColor: '#EDEDED' },
+  thumbnailFallback: { alignItems: 'center', justifyContent: 'center' },
+  thumbnailLabel: { color: '#333333', fontSize: 14, fontWeight: '800', letterSpacing: 2, marginTop: 4 },
+  textThumbnail: { width: '92%', height: '88%', backgroundColor: '#FFFFFF', padding: 10, borderRadius: 4, overflow: 'hidden' },
+  textThumbnailContent: { color: '#222222', fontSize: 7, lineHeight: 10, fontFamily: 'monospace' },
+  textViewer: { flex: 1, backgroundColor: '#101010' },
+  textScrollContent: { padding: 18, paddingBottom: 40 },
+  textContent: { color: '#F2F2F2', fontSize: 14, lineHeight: 21, fontFamily: 'monospace' },
 });
