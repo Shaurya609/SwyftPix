@@ -5,6 +5,8 @@ import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { DocumentPreview } from '@/components/document-preview';
+import { TrashPreviewModal } from '@/components/trash-preview-modal';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { formatFileSize } from '@/utils/formatters';
 import {
@@ -27,6 +29,13 @@ function retentionLabel(retention: RetentionDays): string {
   return `${retention} days`;
 }
 
+function isDocument(item: TrashedAsset): boolean {
+  return item.category === 'document'
+    || item.fileType === 'document'
+    || item.fileType === 'pdf'
+    || item.mimeType?.toLowerCase() === 'application/pdf';
+}
+
 export default function TrashScreen() {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
@@ -35,6 +44,7 @@ export default function TrashScreen() {
   const [retentionDays, setRetentionDaysState] = useState<RetentionDays>(DEFAULT_RETENTION_DAYS);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isSelectionMode, setIsSelectionMode] = useState(false);
+  const [previewItem, setPreviewItem] = useState<TrashedAsset | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -55,6 +65,7 @@ export default function TrashScreen() {
         const availableIds = new Set(trashedAssets.map(item => item.id));
         return new Set([...previous].filter(id => availableIds.has(id)));
       });
+      setPreviewItem(previous => previous && trashedAssets.some(item => item.id === previous.id) ? previous : null);
     } catch (error) {
       console.error('[TrashScreen] Error loading Trash:', error);
     } finally {
@@ -98,8 +109,12 @@ export default function TrashScreen() {
     });
   };
 
-  const handleItemPress = (id: string) => {
-    if (isSelectionMode) toggleSelection(id);
+  const handleItemPress = (item: TrashedAsset) => {
+    if (isSelectionMode) {
+      toggleSelection(item.id);
+      return;
+    }
+    setPreviewItem(item);
   };
 
   const selectAll = () => {
@@ -117,8 +132,6 @@ export default function TrashScreen() {
 
     setIsProcessing(true);
     try {
-      // Keep these sequential. Permanent deletion can require native Android
-      // authorization and the native module intentionally allows one request at a time.
       for (const id of ids) {
         if (action === 'restore') await restoreAsset(id);
         else await permanentlyDeleteAsset(id);
@@ -190,6 +203,36 @@ export default function TrashScreen() {
     );
   };
 
+  const handleRestorePreview = async (item: TrashedAsset) => {
+    if (isProcessing) return;
+    setIsProcessing(true);
+    try {
+      await restoreAsset(item.id);
+      setPreviewItem(null);
+      await loadTrash();
+    } catch (error) {
+      console.error('[TrashScreen] Error restoring preview item:', error);
+      Alert.alert('Restore failed', 'The item could not be restored to the review deck.');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleDeletePreview = async (item: TrashedAsset) => {
+    if (isProcessing) return;
+    setIsProcessing(true);
+    try {
+      await permanentlyDeleteAsset(item.id);
+      setPreviewItem(null);
+      await loadTrash();
+    } catch (error) {
+      console.error('[TrashScreen] Error permanently deleting preview item:', error);
+      Alert.alert('Delete failed', 'The item could not be permanently deleted.');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   const handleRetentionChange = (nextRetention: RetentionDays) => {
     if (nextRetention === retentionDays) return;
     const description = nextRetention === 0
@@ -222,7 +265,7 @@ export default function TrashScreen() {
     const selected = selectedIds.has(item.id);
     return (
       <TouchableOpacity
-        onPress={() => handleItemPress(item.id)}
+        onPress={() => handleItemPress(item)}
         onLongPress={() => enterSelectionMode(item.id)}
         delayLongPress={450}
         activeOpacity={0.8}
@@ -230,7 +273,16 @@ export default function TrashScreen() {
         style={styles.gridItem}
       >
         <View style={[styles.thumbnailWrap, isDark && styles.thumbnailWrapDark, selected && styles.thumbnailWrapSelected]}>
-          <Image source={{ uri: item.uri }} style={styles.thumbnail} contentFit="cover" />
+          {isDocument(item) ? (
+            <DocumentPreview item={item} thumbnail />
+          ) : item.fileType === 'audio' ? (
+            <View style={styles.genericThumbnail}>
+              <View style={styles.genericIconCircle}><MaterialIcons name="audiotrack" size={38} color="#FFFFFF" /></View>
+              <ThemedText style={styles.genericThumbnailLabel}>AUDIO</ThemedText>
+            </View>
+          ) : (
+            <Image source={{ uri: item.uri }} style={styles.thumbnail} contentFit="cover" />
+          )}
           {item.fileType === 'video' && (
             <View style={styles.videoBadge}>
               <MaterialIcons name="play-arrow" size={14} color="#FFFFFF" />
@@ -265,7 +317,7 @@ export default function TrashScreen() {
           <View style={styles.headerTitleWrap}>
             <ThemedText type="title" style={styles.title}>Trash</ThemedText>
             <ThemedText lightColor="#687076" darkColor="#9BA1A6" style={styles.subtitle}>
-              Long-press an item to select it. Tap more items to multi-select.
+              Tap an item to preview. Long-press to select.
             </ThemedText>
           </View>
         )}
@@ -378,7 +430,16 @@ export default function TrashScreen() {
         </View>
       )}
 
-      {isProcessing && (
+      <TrashPreviewModal
+        item={previewItem}
+        visible={previewItem !== null}
+        onClose={() => setPreviewItem(null)}
+        onRestore={handleRestorePreview}
+        onDelete={handleDeletePreview}
+        isProcessing={isProcessing}
+      />
+
+      {isProcessing && !previewItem && (
         <View style={styles.processingOverlay}>
           <View style={[styles.processingCard, isDark && styles.processingCardDark]}>
             <ActivityIndicator size="small" color="#0a7ea4" />
@@ -431,6 +492,9 @@ const styles = StyleSheet.create({
   thumbnailWrapDark: { backgroundColor: '#2C2C2E' },
   thumbnailWrapSelected: { borderColor: '#0a7ea4' },
   thumbnail: { width: '100%', height: '100%' },
+  genericThumbnail: { flex: 1, width: '100%', alignItems: 'center', justifyContent: 'center', backgroundColor: '#202124' },
+  genericIconCircle: { width: 82, height: 82, borderRadius: 41, backgroundColor: '#6C5CE7', alignItems: 'center', justifyContent: 'center' },
+  genericThumbnailLabel: { color: '#FFFFFF', fontSize: 12, fontWeight: '800', letterSpacing: 1.5, marginTop: 9 },
   videoBadge: { position: 'absolute', left: 9, bottom: 9, width: 28, height: 28, borderRadius: 14, backgroundColor: 'rgba(0,0,0,0.65)', alignItems: 'center', justifyContent: 'center' },
   selectionBadge: { position: 'absolute', top: 9, right: 9, width: 26, height: 26, borderRadius: 13, backgroundColor: 'rgba(0,0,0,0.35)', borderWidth: 2, borderColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center' },
   selectionBadgeSelected: { backgroundColor: '#0a7ea4', borderColor: '#0a7ea4' },
