@@ -267,6 +267,68 @@ class SwyftPixMediaDeleteModule : Module() {
     }
   }
 
+  private fun relativePathFor(path: String): String {
+    val normalized = path.replace('\\', '/')
+    val externalRoot = "/storage/emulated/0/"
+
+    return if (normalized.startsWith(externalRoot)) {
+      normalized.removePrefix(externalRoot)
+        .substringBeforeLast('/', "")
+        .let { if (it.isEmpty()) "" else "$it/" }
+    } else {
+      normalized.substringBeforeLast('/', "")
+        .removePrefix("/")
+        .let { if (it.isEmpty()) "" else "$it/" }
+    }
+  }
+
+  private fun findInCollection(
+    resolver: android.content.ContentResolver,
+    collection: Uri,
+    category: String,
+    fileName: String,
+    relativePath: String
+  ): Uri? {
+    return try {
+      val projection = arrayOf(
+        MediaStore.MediaColumns._ID,
+        MediaStore.MediaColumns.DISPLAY_NAME,
+        MediaStore.MediaColumns.RELATIVE_PATH
+      )
+
+      val selection =
+        "${MediaStore.MediaColumns.DISPLAY_NAME} = ? AND " +
+        "${MediaStore.MediaColumns.RELATIVE_PATH} = ?"
+
+      resolver.query(
+        collection,
+        projection,
+        selection,
+        arrayOf(fileName, relativePath),
+        null
+      )?.use { cursor ->
+        if (!cursor.moveToFirst()) return@use null
+
+        val name = cursor.getString(
+          cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
+        )
+        val storedRelativePath = cursor.getString(
+          cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.RELATIVE_PATH)
+        )
+
+        if (!isSafeSharedFile(storedRelativePath, name)) return@use null
+
+        ContentUris.withAppendedId(
+          collection,
+          cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID))
+        )
+      }
+    } catch (error: Exception) {
+      Log.w(TAG, "Safe $category MediaStore lookup failed", error)
+      null
+    }
+  }
+
   private fun findMediaUri(rawPath: String): Uri? {
     if (rawPath.startsWith("content://")) return validateContentUri(Uri.parse(rawPath))
     val targetPath = Uri.parse(rawPath).path ?: rawPath
