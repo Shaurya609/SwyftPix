@@ -4,7 +4,8 @@
     "modules": [
       "expo.modules.swyftpixmedia.SwyftPixMediaDeleteModule",
       "expo.modules.swyftpixmedia.SwyftPixFileAccessModule",
-      "expo.modules.swyftpixmedia.SwyftPixOfficePreviewModule"
+      "expo.modules.swyftpixmedia.SwyftPixOfficePreviewModule",
+      "expo.modules.swyftpixmedia.SwyftPixPptxPreviewModule"
     ]
   }
 }
