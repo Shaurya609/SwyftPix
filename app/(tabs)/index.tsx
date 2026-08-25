@@ -54,6 +54,8 @@ export default function HomeScreen() {
   const [endCursor, setEndCursor] = useState<string | undefined>(undefined);
   const [hasNextPage, setHasNextPage] = useState(false);
   const [isLoadingDeviceMedia, setIsLoadingDeviceMedia] = useState(false);
+  const sessionReviewedIdsRef = useRef<Set<string>>(new Set());
+  const loadRequestRef = useRef(0);
 
   const refreshMediaManagementAccess = useCallback(() => {
     if (Platform.OS !== 'android' || Platform.Version < 31) { setHasMediaManagementAccess(true); return true; }
@@ -91,27 +93,43 @@ export default function HomeScreen() {
 
   const filterItems = useCallback((source: MockMediaItem[], category: HomeCategory | null, reviewedIds: Set<string>) => {
     if (!category) return [];
-    return source.filter(item => matchesCategory(item, category) && !reviewedIds.has(item.id));
+    return source.filter(item => matchesCategory(item, category) && !reviewedIds.has(item.id) && !sessionReviewedIdsRef.current.has(item.id));
   }, []);
 
   const loadFirstPage = useCallback(async (category: HomeCategory) => {
+    const requestId = ++loadRequestRef.current;
     setIsLoadingDeviceMedia(true);
     try {
       const reviewedIds = await getReviewedAssetIds();
-      if (isFileCategory(category) && !hasFileAccess) { setItems([]); setEndCursor(undefined); setHasNextPage(false); return; }
-      if (!hasPermission && !isFileCategory(category)) { setItems(filterItems(MOCK_MEDIA_ITEMS, category, reviewedIds)); setEndCursor(undefined); setHasNextPage(false); return; }
+      if (isFileCategory(category) && !hasFileAccess) {
+        if (requestId !== loadRequestRef.current) return;
+        setItems([]); setEndCursor(undefined); setHasNextPage(false); return;
+      }
+      if (!hasPermission && !isFileCategory(category)) {
+        if (requestId !== loadRequestRef.current) return;
+        setItems(filterItems(MOCK_MEDIA_ITEMS, category, reviewedIds)); setEndCursor(undefined); setHasNextPage(false); return;
+      }
 
       const result = await fetchDeviceMediaPage(40, undefined, category);
+      if (requestId !== loadRequestRef.current) return;
       setItems(filterItems(result.items, category, reviewedIds));
       setEndCursor(result.endCursor); setHasNextPage(result.hasNextPage);
-    } catch (err) { console.error('[HomeScreen] Error loading category:', err); setItems([]); }
-    finally { setIsLoadingDeviceMedia(false); }
+    } catch (err) {
+      if (requestId === loadRequestRef.current) {
+        console.error('[HomeScreen] Error loading category:', err);
+        setItems([]);
+      }
+    } finally {
+      if (requestId === loadRequestRef.current) setIsLoadingDeviceMedia(false);
+    }
   }, [filterItems, hasPermission, hasFileAccess]);
 
   useEffect(() => {
     async function init() {
       try {
         await initialize();
+        const reviewedIds = await getReviewedAssetIds();
+        reviewedIds.forEach(id => sessionReviewedIdsRef.current.add(id));
         setDeletedItems(await getTrashedAssets());
         setHasFileAccess(hasUserFileAccess());
         const granted = await checkAndRequestPermissions();
@@ -166,17 +184,19 @@ export default function HomeScreen() {
     if (!selectedCategory || !hasPermission || !hasNextPage || isLoadingDeviceMedia || items.length > 5) return;
     const category = selectedCategory;
     async function loadMore() {
+      const requestId = ++loadRequestRef.current;
       setIsLoadingDeviceMedia(true);
       try {
         const reviewedIds = await getReviewedAssetIds();
         const result = await fetchDeviceMediaPage(20, endCursor, category);
+        if (requestId !== loadRequestRef.current) return;
         setItems(prev => {
           const existingIds = new Set(prev.map(i => i.id));
-          return [...prev, ...result.items.filter(item => !existingIds.has(item.id) && !reviewedIds.has(item.id))];
+          return [...prev, ...result.items.filter(item => !existingIds.has(item.id) && !reviewedIds.has(item.id) && !sessionReviewedIdsRef.current.has(item.id))];
         });
         setEndCursor(result.endCursor); setHasNextPage(result.hasNextPage);
       } catch (err) { console.error('[HomeScreen] Error loading more device media:', err); }
-      finally { setIsLoadingDeviceMedia(false); }
+      finally { if (requestId === loadRequestRef.current) setIsLoadingDeviceMedia(false); }
     }
     loadMore();
   }, [items.length, hasPermission, hasNextPage, isLoadingDeviceMedia, endCursor, selectedCategory]);
@@ -188,21 +208,43 @@ export default function HomeScreen() {
 
   const handleSwipeLeft = async (item: MockMediaItem) => {
     if (items.length === 0 || items[0].id !== item.id) return;
-    try { await trashAsset(item); setHistory(h => h.some(e => e.item.id === item.id) ? h : [...h, { item, direction: 'left' }]); setDeletedItems(d => d.some(i => i.id === item.id) ? d : [...d, item]); setItems(prev => prev.length && prev[0].id === item.id ? prev.slice(1) : prev); }
-    catch (err) { console.error('[HomeScreen] Error persisting trash action:', err); }
+    try {
+      sessionReviewedIdsRef.current.add(item.id);
+      await trashAsset(item);
+      setHistory(h => h.some(e => e.item.id === item.id) ? h : [...h, { item, direction: 'left' }]);
+      setDeletedItems(d => d.some(i => i.id === item.id) ? d : [...d, item]);
+      setItems(prev => prev.length && prev[0].id === item.id ? prev.slice(1) : prev);
+    } catch (err) {
+      sessionReviewedIdsRef.current.delete(item.id);
+      console.error('[HomeScreen] Error persisting trash action:', err);
+    }
   };
 
   const handleSwipeRight = async (item: MockMediaItem) => {
     if (items.length === 0 || items[0].id !== item.id) return;
-    try { await keepAsset(item.id); setHistory(h => h.some(e => e.item.id === item.id) ? h : [...h, { item, direction: 'right' }]); setKeptItems(k => k.some(i => i.id === item.id) ? k : [...k, item]); setItems(prev => prev.length && prev[0].id === item.id ? prev.slice(1) : prev); }
-    catch (err) { console.error('[HomeScreen] Error persisting keep action:', err); }
+    try {
+      sessionReviewedIdsRef.current.add(item.id);
+      await keepAsset(item.id);
+      setHistory(h => h.some(e => e.item.id === item.id) ? h : [...h, { item, direction: 'right' }]);
+      setKeptItems(k => k.some(i => i.id === item.id) ? k : [...k, item]);
+      setItems(prev => prev.length && prev[0].id === item.id ? prev.slice(1) : prev);
+    } catch (err) {
+      sessionReviewedIdsRef.current.delete(item.id);
+      console.error('[HomeScreen] Error persisting keep action:', err);
+    }
   };
 
   const handleUndo = async () => {
     if (!history.length) return;
     const lastSwipe = history[history.length - 1];
-    try { if (lastSwipe.direction === 'left') await restoreAsset(lastSwipe.item.id); else await undoKeep(lastSwipe.item.id); setHistory(h => h.slice(0, -1)); setDeletedItems(d => d.filter(i => i.id !== lastSwipe.item.id)); setKeptItems(k => k.filter(i => i.id !== lastSwipe.item.id)); setItems(prev => prev.some(i => i.id === lastSwipe.item.id) ? prev : [lastSwipe.item, ...prev]); }
-    catch (err) { console.error('[HomeScreen] Error persisting undo action:', err); }
+    try {
+      if (lastSwipe.direction === 'left') await restoreAsset(lastSwipe.item.id); else await undoKeep(lastSwipe.item.id);
+      sessionReviewedIdsRef.current.delete(lastSwipe.item.id);
+      setHistory(h => h.slice(0, -1));
+      setDeletedItems(d => d.filter(i => i.id !== lastSwipe.item.id));
+      setKeptItems(k => k.filter(i => i.id !== lastSwipe.item.id));
+      setItems(prev => prev.some(i => i.id === lastSwipe.item.id) ? prev : [lastSwipe.item, ...prev]);
+    } catch (err) { console.error('[HomeScreen] Error persisting undo action:', err); }
   };
 
   const categorySelection = (
@@ -228,7 +270,7 @@ export default function HomeScreen() {
           <>
             <View style={styles.modeHeader}><TouchableOpacity onPress={handleChangeCategory} style={styles.modeBackButton} activeOpacity={0.8}><MaterialIcons name="arrow-back" size={22} color="#0a7ea4" /></TouchableOpacity><View style={styles.modeTitleContainer}><ThemedText style={styles.modeTitle} type="defaultSemiBold">{CATEGORIES.find(c => c.id === selectedCategory)?.label}</ThemedText><ThemedText style={styles.modeSubtitle} lightColor="#687076" darkColor="#9BA1A6">Swipe to keep or trash</ThemedText></View></View>
             <View style={styles.cardContainer}>
-              {hasPermission && hasMediaManagementAccess === false ? <View style={styles.emptyContainer}><View style={[styles.emptyCard, isDark ? styles.emptyCardDark : styles.emptyCardLight]}><View style={styles.emptyIconContainer}><MaterialIcons name="security" size={44} color="#0a7ea4" /></View><ThemedText style={styles.emptyTitle}>Finish Setup</ThemedText><ThemedText style={styles.emptyDescription} lightColor="#687076" darkColor="#9BA1A6">Give SwyftPix one-time media-management access. This prevents Android from showing another permission prompt every time you permanently delete an item.</ThemedText><TouchableOpacity style={styles.resetButton} onPress={requestMediaManagementSetup} activeOpacity={0.8}><ThemedText style={styles.resetButtonText}>Open Android Settings</ThemedText></TouchableOpacity></View></View> : isFileCategory(selectedCategory) && !hasFileAccess ? fileAccessCard : isLoadingDeviceMedia && items.length === 0 ? <ActivityIndicator size="large" color="#0a7ea4" /> : items.length > 0 ? <MediaReviewCard ref={cardRef} items={items.slice(0, 2)} onSwipeLeft={handleSwipeLeft} onSwipeRight={handleSwipeRight} onUndo={handleUndo} isDark={isDark} /> : <View style={styles.emptyContainer}><View style={[styles.emptyCard, isDark ? styles.emptyCardDark : styles.emptyCardLight]}><View style={styles.emptyIconContainer}><MaterialIcons name="check-circle" size={44} color="#0a7ea4" /></View><ThemedText style={styles.emptyTitle}>You're all caught up</ThemedText><ThemedText style={styles.emptyDescription} lightColor="#687076" darkColor="#9BA1A6">No more {CATEGORIES.find(c => c.id === selectedCategory)?.label.toLowerCase()} need review.</ThemedText><TouchableOpacity style={styles.resetButton} onPress={handleChangeCategory} activeOpacity={0.8}><ThemedText style={styles.resetButtonText}>Choose Another Category</ThemedText></TouchableOpacity></View></View>}
+              {hasPermission && hasMediaManagementAccess === false ? <View style={styles.emptyContainer}><View style={[styles.emptyCard, isDark ? styles.emptyCardDark : styles.emptyCardLight]}><View style={styles.emptyIconContainer}><MaterialIcons name="security" size={44} color="#0a7ea4" /></View><ThemedText style={styles.emptyTitle}>Finish Setup</ThemedText><ThemedText style={styles.emptyDescription} lightColor="#687076" darkColor="#9BA1A6">Give SwyftPix one-time media-management access. This prevents Android from showing another permission prompt every time you permanently delete an item.</ThemedText><TouchableOpacity style={styles.resetButton} onPress={requestMediaManagementSetup} activeOpacity={0.8}><ThemedText style={styles.resetButtonText}>Open Android Settings</ThemedText></TouchableOpacity></View></View> : isFileCategory(selectedCategory) && !hasFileAccess ? fileAccessCard : isLoadingDeviceMedia && items.length === 0 ? <ActivityIndicator size="large" color="#0a7ea4" /> : items.length > 0 ? <MediaReviewCard key={items[0]?.id} ref={cardRef} items={items.slice(0, 2)} onSwipeLeft={handleSwipeLeft} onSwipeRight={handleSwipeRight} onUndo={handleUndo} isDark={isDark} /> : <View style={styles.emptyContainer}><View style={[styles.emptyCard, isDark ? styles.emptyCardDark : styles.emptyCardLight]}><View style={styles.emptyIconContainer}><MaterialIcons name="check-circle" size={44} color="#0a7ea4" /></View><ThemedText style={styles.emptyTitle}>You're all caught up</ThemedText><ThemedText style={styles.emptyDescription} lightColor="#687076" darkColor="#9BA1A6">No more {CATEGORIES.find(c => c.id === selectedCategory)?.label.toLowerCase()} need review.</ThemedText><TouchableOpacity style={styles.resetButton} onPress={handleChangeCategory} activeOpacity={0.8}><ThemedText style={styles.resetButtonText}>Choose Another Category</ThemedText></TouchableOpacity></View></View>}
             </View>
           </>
         )}
