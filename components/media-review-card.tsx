@@ -1,7 +1,7 @@
 import React, { forwardRef, useEffect, useImperativeHandle, useState } from 'react';
 import { StyleSheet, Text, useWindowDimensions, Modal, TouchableOpacity, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import Animated, { useSharedValue, useAnimatedStyle, withSpring, withTiming, runOnJS, interpolate, Extrapolation } from 'react-native-reanimated';
+import Animated, { cancelAnimation, useSharedValue, useAnimatedStyle, withTiming, runOnJS, interpolate, Extrapolation } from 'react-native-reanimated';
 import * as WebBrowser from 'expo-web-browser';
 import { Image } from 'expo-image';
 import { useVideoPlayer, VideoView } from 'expo-video';
@@ -84,22 +84,47 @@ export const MediaReviewCard = forwardRef<MediaReviewCardRef, MediaReviewCardPro
   const translateY = useSharedValue(0);
 
   useImperativeHandle(ref, () => ({
-    swipeLeft: () => { if (!item) return; translateX.value = withTiming(-screenWidth * 1.5, { duration: 300 }, () => runOnJS(onSwipeLeft)(item)); },
-    swipeRight: () => { if (!item) return; translateX.value = withTiming(screenWidth * 1.5, { duration: 300 }, () => runOnJS(onSwipeRight)(item)); },
+    swipeLeft: () => { if (!item) return; cancelAnimation(translateX); cancelAnimation(translateY); translateX.value = withTiming(-screenWidth * 1.5, { duration: 220 }, finished => { if (finished) runOnJS(onSwipeLeft)(item); }); translateY.value = withTiming(0, { duration: 160 }); },
+    swipeRight: () => { if (!item) return; cancelAnimation(translateX); cancelAnimation(translateY); translateX.value = withTiming(screenWidth * 1.5, { duration: 220 }, finished => { if (finished) runOnJS(onSwipeRight)(item); }); translateY.value = withTiming(0, { duration: 160 }); },
   }), [item, onSwipeLeft, onSwipeRight, screenWidth]);
 
   if (!item) return null;
 
   const animateSwipe = (direction: 'left' | 'right') => {
     const target = direction === 'right' ? screenWidth * 1.5 : -screenWidth * 1.5;
-    translateX.value = withTiming(target, { duration: 250 }, () => runOnJS(direction === 'right' ? onSwipeRight : onSwipeLeft)(item));
+    cancelAnimation(translateX);
+    cancelAnimation(translateY);
+    translateX.value = withTiming(target, { duration: 220 }, finished => {
+      if (finished) runOnJS(direction === 'right' ? onSwipeRight : onSwipeLeft)(item);
+    });
+    translateY.value = withTiming(0, { duration: 160 });
   };
 
-  const panGesture = Gesture.Pan().onUpdate(e => { translateX.value = e.translationX; translateY.value = e.translationY; }).onEnd(e => {
-    if (e.translationX > threshold) runOnJS(animateSwipe)('right');
-    else if (e.translationX < -threshold) runOnJS(animateSwipe)('left');
-    else { translateX.value = withSpring(0, { damping: 15 }); translateY.value = withSpring(0, { damping: 15 }); }
-  });
+  const panGesture = Gesture.Pan()
+    .onBegin(() => {
+      cancelAnimation(translateX);
+      cancelAnimation(translateY);
+    })
+    .onUpdate(e => {
+      translateX.value = e.translationX;
+      translateY.value = e.translationY;
+    })
+    .onEnd(e => {
+      if (e.translationX > threshold) {
+        translateX.value = withTiming(screenWidth * 1.5, { duration: 220 }, finished => {
+          if (finished) runOnJS(onSwipeRight)(item);
+        });
+        translateY.value = withTiming(0, { duration: 160 });
+      } else if (e.translationX < -threshold) {
+        translateX.value = withTiming(-screenWidth * 1.5, { duration: 220 }, finished => {
+          if (finished) runOnJS(onSwipeLeft)(item);
+        });
+        translateY.value = withTiming(0, { duration: 160 });
+      } else {
+        translateX.value = withTiming(0, { duration: 160 });
+        translateY.value = withTiming(0, { duration: 160 });
+      }
+    });
   const tapGesture = Gesture.Tap().onEnd(() => runOnJS(setIsPreviewVisible)(true));
   const gesture = Gesture.Exclusive(panGesture, tapGesture);
   const cardStyle = useAnimatedStyle(() => ({ transform: [{ translateX: translateX.value }, { translateY: translateY.value }, { rotate: `${interpolate(translateX.value, [-screenWidth, 0, screenWidth], [-12, 0, 12], Extrapolation.CLAMP)}deg` }] }));
@@ -109,48 +134,51 @@ export const MediaReviewCard = forwardRef<MediaReviewCardRef, MediaReviewCardPro
   const isDocument = item.category === 'document' || item.fileType === 'document' || item.fileType === 'pdf';
 
   return <View style={styles.reviewContainer}>
-    <GestureDetector gesture={gesture}>
-      <View style={styles.stackContainer}>
-        {nextItem ? <View style={[styles.cardWrapper, styles.backCard]}><MediaPreviewContainer item={nextItem} isTop={false} /></View> : null}
-        <Animated.View style={[styles.cardWrapper, cardStyle]}>
-          <MediaPreviewContainer item={item} isTop />
-          <Animated.View style={[styles.badgeContainer, styles.keepBadge, keepBadge]}><Text style={styles.badgeText}>KEEP</Text></Animated.View>
-          <Animated.View style={[styles.badgeContainer, styles.deleteBadge, deleteBadge]}><Text style={styles.badgeText}>DELETE</Text></Animated.View>
-          <Modal visible={isPreviewVisible} animationType="slide" onRequestClose={() => setIsPreviewVisible(false)}>
-            <View style={styles.modalContainer}>
-              <View style={styles.modalHeader}><View style={styles.modalMeta}><Text style={styles.modalTitle} numberOfLines={1}>{item.fileName}</Text><Text style={styles.modalSubtitle}>{(item.fileSize / (1024 * 1024)).toFixed(2)} MB</Text></View><TouchableOpacity style={styles.closeButton} onPress={() => setIsPreviewVisible(false)}><MaterialIcons name="close" size={26} color="#FFFFFF" /></TouchableOpacity></View>
-              <View style={styles.modalContent}>
-                {item.fileType === 'video' ? <VideoPlayerView uri={item.uri} style={styles.fullVideo} /> : item.fileType === 'audio' ? <FullscreenAudioPreview uri={item.uri} /> : isDocument ? <DocumentPreview item={item} /> : <Image source={{ uri: item.uri }} style={styles.fullImage} contentFit="contain" />}
+    <View style={styles.stackContainer}>
+      <GestureDetector gesture={gesture}>
+        <View style={styles.gestureContainer}>
+          {nextItem ? <View style={[styles.cardWrapper, styles.backCard]}><MediaPreviewContainer item={nextItem} isTop={false} /></View> : null}
+          <Animated.View style={[styles.cardWrapper, cardStyle]}>
+            <MediaPreviewContainer item={item} isTop />
+            <Animated.View style={[styles.badgeContainer, styles.keepBadge, keepBadge]}><Text style={styles.badgeText}>KEEP</Text></Animated.View>
+            <Animated.View style={[styles.badgeContainer, styles.deleteBadge, deleteBadge]}><Text style={styles.badgeText}>DELETE</Text></Animated.View>
+            <Modal visible={isPreviewVisible} animationType="slide" onRequestClose={() => setIsPreviewVisible(false)}>
+              <View style={styles.modalContainer}>
+                <View style={styles.modalHeader}><View style={styles.modalMeta}><Text style={styles.modalTitle} numberOfLines={1}>{item.fileName}</Text><Text style={styles.modalSubtitle}>{(item.fileSize / (1024 * 1024)).toFixed(2)} MB</Text></View><TouchableOpacity style={styles.closeButton} onPress={() => setIsPreviewVisible(false)}><MaterialIcons name="close" size={26} color="#FFFFFF" /></TouchableOpacity></View>
+                <View style={styles.modalContent}>
+                  {item.fileType === 'video' ? <VideoPlayerView uri={item.uri} style={styles.fullVideo} /> : item.fileType === 'audio' ? <FullscreenAudioPreview uri={item.uri} /> : isDocument ? <DocumentPreview item={item} /> : <Image source={{ uri: item.uri }} style={styles.fullImage} contentFit="contain" />}
+                </View>
               </View>
-            </View>
-          </Modal>
-        </Animated.View>
-      </View>
-    </GestureDetector>
+            </Modal>
+          </Animated.View>
+        </View>
+      </GestureDetector>
+    </View>
+    {onReset ? <TouchableOpacity style={styles.resetAction} onPress={() => onReset()}><MaterialIcons name="refresh" size={18} color="#687076" /><Text style={styles.resetActionText}>Reset</Text></TouchableOpacity> : null}
     <View style={styles.actionBar}>
       <TouchableOpacity style={[styles.actionButton, styles.deleteAction]} onPress={() => animateSwipe('left')}><MaterialIcons name="close" size={30} color="#FFFFFF" /></TouchableOpacity>
       <TouchableOpacity style={[styles.actionButton, styles.undoAction]} onPress={() => onUndo?.()}><MaterialIcons name="undo" size={25} color="#FFFFFF" /></TouchableOpacity>
       <TouchableOpacity style={[styles.actionButton, styles.keepAction]} onPress={() => animateSwipe('right')}><MaterialIcons name="check" size={30} color="#FFFFFF" /></TouchableOpacity>
     </View>
-    {onReset ? <TouchableOpacity style={styles.resetAction} onPress={() => onReset()}><MaterialIcons name="refresh" size={18} color="#687076" /><Text style={styles.resetActionText}>Reset</Text></TouchableOpacity> : null}
   </View>;
 });
 
 MediaReviewCard.displayName = 'MediaReviewCard';
 
 const styles = StyleSheet.create({
-  reviewContainer: { flex: 1, width: '100%', alignItems: 'center', justifyContent: 'center' },
-  stackContainer: { ...StyleSheet.absoluteFillObject, justifyContent: 'center', alignItems: 'center' },
+  reviewContainer: { flex: 1, width: '100%', alignItems: 'center', minHeight: 0 },
+  stackContainer: { flex: 1, width: '100%', minHeight: 0, justifyContent: 'center', alignItems: 'center' },
+  gestureContainer: { ...StyleSheet.absoluteFillObject, justifyContent: 'center', alignItems: 'center' },
   cardWrapper: { ...StyleSheet.absoluteFillObject, justifyContent: 'center', alignItems: 'center' },
   backCard: { transform: [{ scale: 0.96 }, { translateY: 10 }], opacity: 0.9 },
   badgeContainer: { position: 'absolute', top: 35, borderWidth: 4, borderRadius: 8, paddingHorizontal: 15, paddingVertical: 5, zIndex: 10 },
   keepBadge: { left: 45, borderColor: '#34C759', backgroundColor: 'rgba(52,199,89,0.9)', transform: [{ rotate: '-15deg' }] },
   deleteBadge: { right: 45, borderColor: '#FF3B30', backgroundColor: 'rgba(255,59,48,0.9)', transform: [{ rotate: '15deg' }] },
   badgeText: { color: '#FFFFFF', fontSize: 24, fontWeight: '800', letterSpacing: 2 },
-  actionBar: { position: 'absolute', bottom: 10, left: 0, right: 0, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 22, zIndex: 30 },
+  actionBar: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 22, paddingTop: 6, paddingBottom: 10, zIndex: 30 },
   actionButton: { width: 58, height: 58, borderRadius: 29, justifyContent: 'center', alignItems: 'center', elevation: 4 },
   deleteAction: { backgroundColor: '#FF3B30' }, undoAction: { width: 48, height: 48, borderRadius: 24, backgroundColor: '#687076' }, keepAction: { backgroundColor: '#34C759' },
-  resetAction: { position: 'absolute', bottom: 76, alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 5, padding: 8, zIndex: 30 },
+  resetAction: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 8, paddingTop: 0, paddingBottom: 2, zIndex: 30 },
   resetActionText: { color: '#687076', fontSize: 13, fontWeight: '600' },
   modalContainer: { flex: 1, backgroundColor: '#000000' },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingTop: 50, paddingBottom: 15, backgroundColor: 'rgba(0,0,0,0.8)', zIndex: 10 },
