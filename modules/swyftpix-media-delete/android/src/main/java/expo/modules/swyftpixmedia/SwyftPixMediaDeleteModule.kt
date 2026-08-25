@@ -4,23 +4,26 @@ import android.app.Activity
 import android.content.ContentUris
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.pdf.PdfRenderer
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
+import android.os.ParcelFileDescriptor
 import android.provider.MediaStore
 import android.provider.Settings
 import android.util.Log
 import expo.modules.kotlin.Promise
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
+import java.io.File
+import java.io.FileOutputStream
 
 class SwyftPixMediaDeleteModule : Module() {
   companion object {
     private const val TAG = "SwyftPixMediaDelete"
     private const val DELETE_REQUEST_CODE = 47261
-    // Android/data and Android/obb are protected app/system areas. Android/media is shared storage
-    // and must remain discoverable so sources such as WhatsApp can be classified correctly.
     private val PROTECTED_PATH_PREFIXES = listOf("Android/data/", "Android/obb/")
   }
 
@@ -69,6 +72,14 @@ class SwyftPixMediaDeleteModule : Module() {
 
     Function("listSharedFiles") { category: String, limit: Int ->
       listSharedFiles(category, limit.coerceIn(1, 200))
+    }
+
+    AsyncFunction("renderPdfPage") { uriString: String, pageIndex: Int, maxWidth: Int ->
+      renderPdfPage(uriString, pageIndex, maxWidth.coerceIn(320, 1800))
+    }
+
+    AsyncFunction("getPdfPageCount") { uriString: String ->
+      getPdfPageCount(uriString)
     }
 
     AsyncFunction("deleteMediaByPath") { path: String, promise: Promise ->
@@ -123,6 +134,51 @@ class SwyftPixMediaDeleteModule : Module() {
     }
   }
 
+  private fun renderPdfPage(uriString: String, pageIndex: Int, maxWidth: Int): String? {
+    if (!uriString.startsWith("content://")) return null
+    return try {
+      val uri = Uri.parse(uriString)
+      context.contentResolver.openFileDescriptor(uri, "r")?.use { descriptor ->
+        PdfRenderer(descriptor).use { renderer ->
+          if (pageIndex !in 0 until renderer.pageCount) return null
+          renderer.openPage(pageIndex).use { page ->
+            val scale = maxWidth.toFloat() / page.width.toFloat()
+            val width = maxOf(1, (page.width * scale).toInt())
+            val height = maxOf(1, (page.height * scale).toInt())
+            val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+            bitmap.eraseColor(android.graphics.Color.WHITE)
+            page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+
+            val cacheDir = File(context.cacheDir, "pdf-previews")
+            if (!cacheDir.exists()) cacheDir.mkdirs()
+            val safeName = "${uriString.hashCode().toUInt().toString(16)}_${pageIndex}_${width}.png"
+            val output = File(cacheDir, safeName)
+            FileOutputStream(output).use { stream ->
+              bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream)
+            }
+            bitmap.recycle()
+            output.toURI().toString()
+          }
+        }
+      }
+    } catch (error: Exception) {
+      Log.w(TAG, "PDF page rendering failed for page=$pageIndex", error)
+      null
+    }
+  }
+
+  private fun getPdfPageCount(uriString: String): Int {
+    if (!uriString.startsWith("content://")) return 0
+    return try {
+      context.contentResolver.openFileDescriptor(Uri.parse(uriString), "r")?.use { descriptor ->
+        PdfRenderer(descriptor).use { it.pageCount }
+      } ?: 0
+    } catch (error: Exception) {
+      Log.w(TAG, "PDF page count failed", error)
+      0
+    }
+  }
+
   private fun isProtectedRelativePath(relativePath: String): Boolean {
     val normalized = relativePath.replace('\\', '/').removePrefix("/")
     if (normalized.equals("Android", true)) return true
@@ -167,7 +223,6 @@ class SwyftPixMediaDeleteModule : Module() {
 
         while (cursor.moveToNext() && results.size < limit) {
           val mediaType = if (mediaTypeIndex >= 0) cursor.getInt(mediaTypeIndex) else MediaStore.Files.FileColumns.MEDIA_TYPE_NONE
-          // NONE covers APKs/archives/other files; DOCUMENT covers PDFs and office/text files.
           if (mediaType != MediaStore.Files.FileColumns.MEDIA_TYPE_NONE && mediaType != MediaStore.Files.FileColumns.MEDIA_TYPE_DOCUMENT) continue
 
           val name = cursor.getString(nameIndex) ?: continue
@@ -176,8 +231,6 @@ class SwyftPixMediaDeleteModule : Module() {
 
           val mimeType = if (mimeIndex >= 0 && !cursor.isNull(mimeIndex)) cursor.getString(mimeIndex) else "application/octet-stream"
           val fileCategory = classifyFile(name, mimeType)
-          // "All Media" is a curated aggregate of supported SwyftPix categories.
-          // Unsupported/unknown files must never leak into it as a catch-all.
           if (category == "all" && fileCategory == "other") continue
           if (category != "all" && fileCategory != category) continue
 
