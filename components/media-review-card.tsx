@@ -2,7 +2,6 @@ import React, { forwardRef, useEffect, useImperativeHandle, useState } from 'rea
 import { StyleSheet, Text, useWindowDimensions, Modal, TouchableOpacity, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { cancelAnimation, useSharedValue, useAnimatedStyle, withTiming, runOnJS, interpolate, Extrapolation } from 'react-native-reanimated';
-import * as WebBrowser from 'expo-web-browser';
 import { Image } from 'expo-image';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { useAudioPlayer, useAudioPlayerStatus, setIsAudioActiveAsync } from 'expo-audio';
@@ -17,7 +16,6 @@ interface MediaReviewCardProps {
   onSwipeLeft: (item: MockMediaItem) => void | Promise<void>;
   onSwipeRight: (item: MockMediaItem) => void | Promise<void>;
   onUndo?: () => void | Promise<void>;
-  onReset?: () => void | Promise<void>;
   isDark?: boolean;
 }
 
@@ -74,7 +72,7 @@ function formatTime(seconds: number): string {
   return `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, '0')}`;
 }
 
-export const MediaReviewCard = forwardRef<MediaReviewCardRef, MediaReviewCardProps>(({ items, onSwipeLeft, onSwipeRight, onUndo, onReset }, ref) => {
+export const MediaReviewCard = forwardRef<MediaReviewCardRef, MediaReviewCardProps>(({ items, onSwipeLeft, onSwipeRight, onUndo }, ref) => {
   const { width: screenWidth } = useWindowDimensions();
   const threshold = screenWidth * 0.35;
   const item = items[0];
@@ -101,24 +99,14 @@ export const MediaReviewCard = forwardRef<MediaReviewCardRef, MediaReviewCardPro
   };
 
   const panGesture = Gesture.Pan()
-    .onBegin(() => {
-      cancelAnimation(translateX);
-      cancelAnimation(translateY);
-    })
-    .onUpdate(e => {
-      translateX.value = e.translationX;
-      translateY.value = e.translationY;
-    })
+    .onBegin(() => { cancelAnimation(translateX); cancelAnimation(translateY); })
+    .onUpdate(e => { translateX.value = e.translationX; translateY.value = e.translationY; })
     .onEnd(e => {
       if (e.translationX > threshold) {
-        translateX.value = withTiming(screenWidth * 1.5, { duration: 220 }, finished => {
-          if (finished) runOnJS(onSwipeRight)(item);
-        });
+        translateX.value = withTiming(screenWidth * 1.5, { duration: 220 }, finished => { if (finished) runOnJS(onSwipeRight)(item); });
         translateY.value = withTiming(0, { duration: 160 });
       } else if (e.translationX < -threshold) {
-        translateX.value = withTiming(-screenWidth * 1.5, { duration: 220 }, finished => {
-          if (finished) runOnJS(onSwipeLeft)(item);
-        });
+        translateX.value = withTiming(-screenWidth * 1.5, { duration: 220 }, finished => { if (finished) runOnJS(onSwipeLeft)(item); });
         translateY.value = withTiming(0, { duration: 160 });
       } else {
         translateX.value = withTiming(0, { duration: 160 });
@@ -154,7 +142,6 @@ export const MediaReviewCard = forwardRef<MediaReviewCardRef, MediaReviewCardPro
         </View>
       </GestureDetector>
     </View>
-    {onReset ? <TouchableOpacity style={styles.resetAction} onPress={() => onReset()}><MaterialIcons name="refresh" size={18} color="#687076" /><Text style={styles.resetActionText}>Reset</Text></TouchableOpacity> : null}
     <View style={styles.actionBar}>
       <TouchableOpacity style={[styles.actionButton, styles.deleteAction]} onPress={() => animateSwipe('left')}><MaterialIcons name="close" size={30} color="#FFFFFF" /></TouchableOpacity>
       <TouchableOpacity style={[styles.actionButton, styles.undoAction]} onPress={() => onUndo?.()}><MaterialIcons name="undo" size={25} color="#FFFFFF" /></TouchableOpacity>
@@ -178,8 +165,6 @@ const styles = StyleSheet.create({
   actionBar: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 22, paddingTop: 6, paddingBottom: 10, zIndex: 30 },
   actionButton: { width: 58, height: 58, borderRadius: 29, justifyContent: 'center', alignItems: 'center', elevation: 4 },
   deleteAction: { backgroundColor: '#FF3B30' }, undoAction: { width: 48, height: 48, borderRadius: 24, backgroundColor: '#687076' }, keepAction: { backgroundColor: '#34C759' },
-  resetAction: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 8, paddingTop: 0, paddingBottom: 2, zIndex: 30 },
-  resetActionText: { color: '#687076', fontSize: 13, fontWeight: '600' },
   modalContainer: { flex: 1, backgroundColor: '#000000' },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingTop: 50, paddingBottom: 15, backgroundColor: 'rgba(0,0,0,0.8)', zIndex: 10 },
   modalMeta: { flex: 1, marginRight: 15 }, modalTitle: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' }, modalSubtitle: { color: '#B0B0B0', fontSize: 12, marginTop: 3 },
