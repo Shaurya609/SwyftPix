@@ -1,11 +1,12 @@
-import React from 'react';
-import { StyleSheet, View, Text } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { ActivityIndicator, StyleSheet, View, Text } from 'react-native';
 import { Image } from 'expo-image';
 import { MockMediaItem } from '../types/media';
 import { formatFileSize, formatDate } from '../utils/formatters';
 import { ThemedText } from './themed-text';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
+import { renderPdfPage } from '../modules/swyftpix-media-delete';
 
 interface MediaPreviewContainerProps {
   item: MockMediaItem;
@@ -15,11 +16,28 @@ interface MediaPreviewContainerProps {
 export function MediaPreviewContainer({ item, isTop }: MediaPreviewContainerProps) {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
-
   const isAudio = item.fileType === 'audio';
   const isVideo = item.fileType === 'video';
   const isVisual = ['photo', 'screenshot', 'whatsapp', 'video'].includes(item.fileType);
   const isDocument = ['pdf', 'document'].includes(item.fileType);
+  const isPdf = item.fileType === 'pdf' || item.fileName.toLowerCase().endsWith('.pdf') || item.mimeType?.toLowerCase() === 'application/pdf';
+  const [pdfThumbnail, setPdfThumbnail] = useState<string | null>(null);
+  const [pdfLoading, setPdfLoading] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!isPdf) {
+      setPdfThumbnail(null);
+      return;
+    }
+    setPdfLoading(true);
+    renderPdfPage(item.uri, 0, 900).then(uri => {
+      if (cancelled) return;
+      setPdfThumbnail(uri);
+      setPdfLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [item.uri, isPdf]);
 
   const getSourceBadgeColor = (source: string) => {
     switch (source) {
@@ -69,70 +87,39 @@ export function MediaPreviewContainer({ item, isTop }: MediaPreviewContainerProp
             <Image source={{ uri: item.uri }} style={styles.image} contentFit="cover" transition={200} />
             {isVideo && (
               <View style={styles.videoOverlay}>
-                <View style={styles.playButton}>
-                  <MaterialIcons name="play-arrow" size={40} color="#FFFFFF" style={{ marginLeft: 4 }} />
-                </View>
-                {item.duration && (
-                  <View style={styles.durationBadge}>
-                    <Text style={styles.durationText}>{item.duration}</Text>
-                  </View>
-                )}
+                <View style={styles.playButton}><MaterialIcons name="play-arrow" size={40} color="#FFFFFF" style={{ marginLeft: 4 }} /></View>
+                {item.duration ? <View style={styles.durationBadge}><Text style={styles.durationText}>{item.duration}</Text></View> : null}
               </View>
             )}
+          </View>
+        ) : isPdf && pdfThumbnail ? (
+          <View style={styles.imageWrapper}>
+            <View style={styles.pdfThumbnailBackground}>
+              <Image source={{ uri: pdfThumbnail }} style={styles.pdfThumbnail} contentFit="contain" />
+            </View>
           </View>
         ) : (
           <View style={[styles.genericPreview, { backgroundColor: isDark ? '#202124' : '#F2F2F7' }]}>
-            <View style={[styles.genericIconCircle, { backgroundColor: getGenericColor() }]}>
-              <MaterialIcons name={getFileIcon() as any} size={52} color="#FFFFFF" />
-            </View>
-            <Text style={[styles.genericTypeLabel, { color: isDark ? '#FFFFFF' : '#333333' }]}>
-              {isAudio ? 'AUDIO FILE' : isDocument ? item.fileType.toUpperCase() : item.fileType.toUpperCase()}
-            </Text>
+            {isPdf && pdfLoading ? <ActivityIndicator size="large" color="#0A7EA4" /> : <View style={[styles.genericIconCircle, { backgroundColor: getGenericColor() }]}><MaterialIcons name={getFileIcon() as any} size={52} color="#FFFFFF" /></View>}
+            {!isPdf || !pdfLoading ? <Text style={[styles.genericTypeLabel, { color: isDark ? '#FFFFFF' : '#333333' }]}>{isAudio ? 'AUDIO FILE' : isDocument ? item.fileType.toUpperCase() : item.fileType.toUpperCase()}</Text> : null}
             {isAudio && (
-              <View style={styles.audioHint}>
-                <MaterialIcons name="play-circle-outline" size={18} color="#6C5CE7" />
-                <Text style={styles.audioHintText}>Tap to preview</Text>
-              </View>
+              <View style={styles.audioHint}><MaterialIcons name="play-circle-outline" size={18} color="#6C5CE7" /><Text style={styles.audioHintText}>Tap to preview</Text></View>
             )}
-            {item.duration && !isAudio && (
-              <View style={styles.durationBadge}>
-                <Text style={styles.durationText}>{item.duration}</Text>
-              </View>
-            )}
+            {item.duration && !isAudio ? <View style={styles.durationBadge}><Text style={styles.durationText}>{item.duration}</Text></View> : null}
           </View>
         )}
 
-        <View style={[styles.sourceBadge, { backgroundColor: getSourceBadgeColor(item.source) }]}>
-          <Text style={styles.sourceText}>{item.source}</Text>
-        </View>
-
-        <View style={[styles.typeOverlay, isDark ? styles.typeOverlayDark : styles.typeOverlayLight]}>
-          <MaterialIcons name={getFileIcon() as any} size={16} color={isDark ? '#FFF' : '#333'} />
-        </View>
-
-        {isTop && (
-          <View style={styles.inspectPrompt}>
-            <MaterialIcons name="visibility" size={14} color="#FFF" />
-            <Text style={styles.inspectText}>Tap to full inspect</Text>
-          </View>
-        )}
+        <View style={[styles.sourceBadge, { backgroundColor: getSourceBadgeColor(item.source) }]}><Text style={styles.sourceText}>{item.source}</Text></View>
+        <View style={[styles.typeOverlay, isDark ? styles.typeOverlayDark : styles.typeOverlayLight]}><MaterialIcons name={getFileIcon() as any} size={16} color={isDark ? '#FFF' : '#333'} /></View>
+        {isTop ? <View style={styles.inspectPrompt}><MaterialIcons name="visibility" size={14} color="#FFF" /><Text style={styles.inspectText}>Tap to full inspect</Text></View> : null}
       </View>
 
       <View style={styles.infoContainer}>
-        <View style={styles.nameRow}>
-          <ThemedText type="defaultSemiBold" style={styles.fileName} numberOfLines={1}>{item.fileName}</ThemedText>
-        </View>
-
+        <View style={styles.nameRow}><ThemedText type="defaultSemiBold" style={styles.fileName} numberOfLines={1}>{item.fileName}</ThemedText></View>
         <View style={styles.metaGrid}>
-          <View style={styles.metaColumn}>
-            <Text style={[styles.metaLabel, isDark ? styles.labelDark : styles.labelLight]}>SIZE</Text>
-            <ThemedText type="defaultSemiBold" style={styles.metaValue}>{formatFileSize(item.fileSize)}</ThemedText>
-          </View>
+          <View style={styles.metaColumn}><Text style={[styles.metaLabel, isDark ? styles.labelDark : styles.labelLight]}>SIZE</Text><ThemedText type="defaultSemiBold" style={styles.metaValue}>{formatFileSize(item.fileSize)}</ThemedText></View>
           <View style={[styles.divider, { backgroundColor: isDark ? '#3A3A3C' : '#E5E5EA' }]} />
-          <View style={styles.metaColumn}>
-            <Text style={[styles.metaLabel, isDark ? styles.labelDark : styles.labelLight]}>CREATED</Text>
-            <ThemedText type="defaultSemiBold" style={styles.metaValue}>{formatDate(item.dateCreated)}</ThemedText>
-          </View>
+          <View style={styles.metaColumn}><Text style={[styles.metaLabel, isDark ? styles.labelDark : styles.labelLight]}>CREATED</Text><ThemedText type="defaultSemiBold" style={styles.metaValue}>{formatDate(item.dateCreated)}</ThemedText></View>
         </View>
       </View>
     </View>
@@ -146,6 +133,8 @@ const styles = StyleSheet.create({
   previewContainer: { flex: 1, position: 'relative', overflow: 'hidden' },
   imageWrapper: { width: '100%', height: '100%' },
   image: { width: '100%', height: '100%' },
+  pdfThumbnailBackground: { flex: 1, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center' },
+  pdfThumbnail: { width: '100%', height: '100%' },
   genericPreview: { width: '100%', height: '100%', justifyContent: 'center', alignItems: 'center', padding: 24 },
   genericIconCircle: { width: 110, height: 110, borderRadius: 55, justifyContent: 'center', alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.15, shadowRadius: 8, elevation: 4, marginBottom: 18 },
   genericTypeLabel: { fontSize: 15, fontWeight: '800', letterSpacing: 1.5, marginBottom: 12 },
