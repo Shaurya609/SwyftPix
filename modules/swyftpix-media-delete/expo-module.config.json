@@ -3,7 +3,8 @@
   "android": {
     "modules": [
       "expo.modules.swyftpixmedia.SwyftPixMediaDeleteModule",
-      "expo.modules.swyftpixmedia.SwyftPixFileAccessModule"
+      "expo.modules.swyftpixmedia.SwyftPixFileAccessModule",
+      "expo.modules.swyftpixmedia.SwyftPixOfficePreviewModule"
     ]
   }
 }
