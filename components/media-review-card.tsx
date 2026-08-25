@@ -81,6 +81,14 @@ export const MediaReviewCard = forwardRef<MediaReviewCardRef, MediaReviewCardPro
   const translateX = useSharedValue(0);
   const translateY = useSharedValue(0);
 
+  useEffect(() => {
+    setIsPreviewVisible(false);
+    cancelAnimation(translateX);
+    cancelAnimation(translateY);
+    translateX.value = 0;
+    translateY.value = 0;
+  }, [item?.id, translateX, translateY]);
+
   useImperativeHandle(ref, () => ({
     swipeLeft: () => { if (!item) return; cancelAnimation(translateX); cancelAnimation(translateY); translateX.value = withTiming(-screenWidth * 1.5, { duration: 220 }, finished => { if (finished) runOnJS(onSwipeLeft)(item); }); translateY.value = withTiming(0, { duration: 160 }); },
     swipeRight: () => { if (!item) return; cancelAnimation(translateX); cancelAnimation(translateY); translateX.value = withTiming(screenWidth * 1.5, { duration: 220 }, finished => { if (finished) runOnJS(onSwipeRight)(item); }); translateY.value = withTiming(0, { duration: 160 }); },
@@ -134,7 +142,7 @@ export const MediaReviewCard = forwardRef<MediaReviewCardRef, MediaReviewCardPro
               <View style={styles.modalContainer}>
                 <View style={styles.modalHeader}><View style={styles.modalMeta}><Text style={styles.modalTitle} numberOfLines={1}>{item.fileName}</Text><Text style={styles.modalSubtitle}>{(item.fileSize / (1024 * 1024)).toFixed(2)} MB</Text></View><TouchableOpacity style={styles.closeButton} onPress={() => setIsPreviewVisible(false)}><MaterialIcons name="close" size={26} color="#FFFFFF" /></TouchableOpacity></View>
                 <View style={styles.modalContent}>
-                  {item.fileType === 'video' ? <VideoPlayerView uri={item.uri} style={styles.fullVideo} /> : item.fileType === 'audio' ? <FullscreenAudioPreview uri={item.uri} /> : isDocument ? <DocumentPreview item={item} /> : <Image source={{ uri: item.uri }} style={styles.fullImage} contentFit="contain" />}
+                  {item.fileType === 'video' ? <VideoPlayerView key={item.id} uri={item.uri} style={styles.fullVideo} /> : item.fileType === 'audio' ? <FullscreenAudioPreview key={item.id} uri={item.uri} /> : isDocument ? <DocumentPreview key={item.id} item={item} /> : <Image key={item.id} source={{ uri: item.uri }} style={styles.fullImage} contentFit="contain" />}
                 </View>
               </View>
             </Modal>
