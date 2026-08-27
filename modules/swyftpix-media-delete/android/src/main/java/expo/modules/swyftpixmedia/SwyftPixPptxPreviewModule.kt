@@ -21,6 +21,9 @@ class SwyftPixPptxPreviewModule : Module() {
 
   private data class SlideSize(val width: Double, val height: Double)
   private data class Bounds(val x: Double, val y: Double, val w: Double, val h: Double)
+  private data class RawBounds(val x: Double, val y: Double, val w: Double, val h: Double)
+  private data class GroupTransform(val x: Double, val y: Double, val w: Double, val h: Double, val childX: Double, val childY: Double, val childW: Double, val childH: Double)
+  private data class GroupRange(val start: Int, val end: Int, val transform: GroupTransform)
 
   private fun renderPptxHtml(uriString: String): String? {
     if (!uriString.startsWith("content://")) return null
@@ -64,7 +67,7 @@ class SwyftPixPptxPreviewModule : Module() {
         .shape{position:absolute;overflow:hidden;white-space:pre-wrap;word-break:break-word}
         .picture{position:absolute;object-fit:contain}
         .table-frame{position:absolute;overflow:hidden;background:rgba(255,255,255,.92)}
-        .ppt-table{width:100%;height:100%;border-collapse:collapse;table-layout:fixed;color:#171717}
+        .ppt-table{width:100%;height:100%;border-collapse:collapse;table-layout:fixed;color:#171717;font-size:1.45vw;line-height:1.1}
         .ppt-table td{border:1px solid rgba(0,0,0,.35);padding:2px;vertical-align:middle;white-space:pre-wrap;word-break:break-word}
         .slide-number{position:absolute;right:10px;bottom:7px;font-size:10px;color:rgba(0,0,0,.45);z-index:1000}
         .pptx-controls{position:fixed;z-index:2000;left:50%;bottom:12px;transform:translateX(-50%);display:flex;align-items:center;gap:10px;padding:6px 10px;border-radius:22px;background:rgba(0,0,0,.78);color:#fff;font-size:12px}
@@ -94,6 +97,7 @@ class SwyftPixPptxPreviewModule : Module() {
   private fun renderSlide(zip: ZipFile, slideName: String, number: Int, size: SlideSize): String {
     val xml = zip.getInputStream(zip.getEntry(slideName)).bufferedReader().readText()
     val rels = readRelationships(zip, slideName)
+    val groups = findGroupRanges(xml)
     val out = StringBuilder("<section class=\"slide\">")
 
     extractShapeBackgroundFill(Regex("<p:bg\\b.*?</p:bg>", setOf(RegexOption.DOT_MATCHES_ALL)).find(xml)?.value.orEmpty())?.let {
@@ -102,7 +106,7 @@ class SwyftPixPptxPreviewModule : Module() {
 
     Regex("<p:sp\\b.*?</p:sp>", setOf(RegexOption.DOT_MATCHES_ALL)).findAll(xml).forEach { match ->
       val shape = match.value
-      val bounds = extractBounds(shape, size) ?: return@forEach
+      val bounds = extractBounds(shape, size, transformsFor(groups, match.range.first)) ?: return@forEach
       // IMPORTANT: shape fill and text color live in different XML branches.
       // The old implementation searched the entire shape for <a:solidFill>,
       // which often found the text color and incorrectly painted the text box
@@ -143,14 +147,14 @@ class SwyftPixPptxPreviewModule : Module() {
 
     Regex("<p:graphicFrame\\b.*?</p:graphicFrame>", setOf(RegexOption.DOT_MATCHES_ALL)).findAll(xml).forEach { match ->
       val frame = match.value
-      val bounds = extractBounds(frame, size) ?: return@forEach
+      val bounds = extractBounds(frame, size, transformsFor(groups, match.range.first)) ?: return@forEach
       val table = Regex("<a:tbl\\b.*?</a:tbl>", setOf(RegexOption.DOT_MATCHES_ALL)).find(frame)?.value ?: return@forEach
       out.append(renderTable(table, bounds))
     }
 
     Regex("<p:pic\\b.*?</p:pic>", setOf(RegexOption.DOT_MATCHES_ALL)).findAll(xml).forEach { match ->
       val pic = match.value
-      val bounds = extractBounds(pic, size) ?: return@forEach
+      val bounds = extractBounds(pic, size, transformsFor(groups, match.range.first)) ?: return@forEach
       val embed = Regex("r:embed=\"([^\"]+)\"").find(pic)?.groupValues?.get(1) ?: return@forEach
       val target = rels[embed] ?: return@forEach
       val entryName = normalizeZipPath(slideName.substringBeforeLast('/') + "/" + target)
@@ -173,21 +177,62 @@ class SwyftPixPptxPreviewModule : Module() {
     return SlideSize(x, y)
   }
 
-  private fun extractBounds(xml: String, size: SlideSize): Bounds? {
+  private fun extractBounds(xml: String, size: SlideSize, transforms: List<GroupTransform> = emptyList()): Bounds? {
     val xfrm = Regex("<(?:a|p):xfrm\\b.*?</(?:a|p):xfrm>", setOf(RegexOption.DOT_MATCHES_ALL)).find(xml)?.value ?: return null
     val off = Regex("<a:off[^>]*x=\"(-?\\d+)\"[^>]*y=\"(-?\\d+)\"").find(xfrm) ?: return null
     val ext = Regex("<a:ext[^>]*cx=\"(\\d+)\"[^>]*cy=\"(\\d+)\"").find(xfrm) ?: return null
-    val x = off.groupValues[1].toDoubleOrNull() ?: return null
-    val y = off.groupValues[2].toDoubleOrNull() ?: return null
-    val w = ext.groupValues[1].toDoubleOrNull() ?: return null
-    val h = ext.groupValues[2].toDoubleOrNull() ?: return null
+    var raw = RawBounds(
+      off.groupValues[1].toDoubleOrNull() ?: return null,
+      off.groupValues[2].toDoubleOrNull() ?: return null,
+      ext.groupValues[1].toDoubleOrNull() ?: return null,
+      ext.groupValues[2].toDoubleOrNull() ?: return null
+    )
+    transforms.forEach { group ->
+      raw = RawBounds(
+        group.x + (raw.x - group.childX) * group.w / group.childW,
+        group.y + (raw.y - group.childY) * group.h / group.childH,
+        raw.w * group.w / group.childW,
+        raw.h * group.h / group.childH
+      )
+    }
     return Bounds(
-      x / size.width * 100.0,
-      y / size.height * 100.0,
-      w / size.width * 100.0,
-      h / size.height * 100.0
+      raw.x / size.width * 100.0,
+      raw.y / size.height * 100.0,
+      raw.w / size.width * 100.0,
+      raw.h / size.height * 100.0
     )
   }
+
+  private fun findGroupRanges(xml: String): List<GroupRange> {
+    val starts = ArrayDeque<Int>()
+    val ranges = mutableListOf<GroupRange>()
+    Regex("<p:grpSp\\b|</p:grpSp>").findAll(xml).forEach { match ->
+      if (match.value.startsWith("</")) {
+        val start = starts.removeLastOrNull() ?: return@forEach
+        val content = xml.substring(start, match.range.last + 1)
+        extractGroupTransform(content)?.let { ranges.add(GroupRange(start, match.range.last, it)) }
+      } else starts.addLast(match.range.first)
+    }
+    return ranges
+  }
+
+  private fun extractGroupTransform(xml: String): GroupTransform? {
+    val properties = Regex("<p:grpSpPr\\b.*?</p:grpSpPr>", setOf(RegexOption.DOT_MATCHES_ALL)).find(xml)?.value ?: return null
+    val xfrm = Regex("<a:xfrm\\b.*?</a:xfrm>", setOf(RegexOption.DOT_MATCHES_ALL)).find(properties)?.value ?: return null
+    fun pair(tag: String, first: String, second: String): Pair<Double, Double>? {
+      val found = Regex("<$tag[^>]*$first=\"(-?\\d+)\"[^>]*$second=\"(-?\\d+)\"").find(xfrm) ?: return null
+      return (found.groupValues[1].toDoubleOrNull() ?: return null) to (found.groupValues[2].toDoubleOrNull() ?: return null)
+    }
+    val off = pair("a:off", "x", "y") ?: return null
+    val ext = pair("a:ext", "cx", "cy") ?: return null
+    val childOff = pair("a:chOff", "x", "y") ?: (0.0 to 0.0)
+    val childExt = pair("a:chExt", "cx", "cy") ?: ext
+    if (childExt.first == 0.0 || childExt.second == 0.0) return null
+    return GroupTransform(off.first, off.second, ext.first, ext.second, childOff.first, childOff.second, childExt.first, childExt.second)
+  }
+
+  private fun transformsFor(groups: List<GroupRange>, position: Int): List<GroupTransform> =
+    groups.filter { position in it.start..it.end }.sortedByDescending { it.start }.map { it.transform }
 
   private fun renderTable(table: String, bounds: Bounds): String {
     val rows = Regex("<a:tr\\b.*?</a:tr>", setOf(RegexOption.DOT_MATCHES_ALL)).findAll(table).map { row ->
