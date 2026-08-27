@@ -56,13 +56,38 @@ class SwyftPixPptxPreviewModule : Module() {
       <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5, user-scalable=yes" />
       <style>
         *{box-sizing:border-box}
-        html,body{margin:0;padding:0;background:#242424}
-        body{padding:12px 0 28px;font-family:Arial,Helvetica,sans-serif}
-        .slide{position:relative;width:min(1100px,calc(100vw - 16px));aspect-ratio:${size.width}/${size.height};margin:0 auto 16px;background:#fff;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.38)}
+        html,body{margin:0;padding:0;width:100%;height:100%;background:#242424;overflow:hidden}
+        body{font-family:Arial,Helvetica,sans-serif}
+        #slides{width:100%;height:100%;display:flex;align-items:center;justify-content:center}
+        .slide{display:none;position:relative;width:min(1100px,calc(100vw - 16px));aspect-ratio:${size.width}/${size.height};margin:0 auto;background:#fff;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.38)}
+        .slide.active{display:block}
         .shape{position:absolute;overflow:hidden;white-space:pre-wrap;word-break:break-word}
         .picture{position:absolute;object-fit:contain}
+        .table-frame{position:absolute;overflow:hidden;background:rgba(255,255,255,.92)}
+        .ppt-table{width:100%;height:100%;border-collapse:collapse;table-layout:fixed;color:#171717}
+        .ppt-table td{border:1px solid rgba(0,0,0,.35);padding:2px;vertical-align:middle;white-space:pre-wrap;word-break:break-word}
         .slide-number{position:absolute;right:10px;bottom:7px;font-size:10px;color:rgba(0,0,0,.45);z-index:1000}
-      </style></head><body>$slides</body></html>
+        .pptx-controls{position:fixed;z-index:2000;left:50%;bottom:12px;transform:translateX(-50%);display:flex;align-items:center;gap:10px;padding:6px 10px;border-radius:22px;background:rgba(0,0,0,.78);color:#fff;font-size:12px}
+        .pptx-controls button{width:34px;height:34px;border:0;border-radius:17px;background:#fff;color:#111;font-size:24px;line-height:1;cursor:pointer}
+      </style></head><body><main id="slides">$slides</main>
+      <div class="pptx-controls"><button type="button" id="previous" aria-label="Previous slide">‹</button><span id="slide-status"></span><button type="button" id="next" aria-label="Next slide">›</button></div>
+      <script>
+        const slides=Array.from(document.querySelectorAll('.slide'));
+        const status=document.getElementById('slide-status');
+        let index=0;
+        function show(next){
+          if(!slides.length)return;
+          index=(next+slides.length)%slides.length;
+          slides.forEach((slide,position)=>slide.classList.toggle('active',position===index));
+          status.textContent=(index+1)+' / '+slides.length;
+        }
+        document.getElementById('previous').addEventListener('click',()=>show(index-1));
+        document.getElementById('next').addEventListener('click',()=>show(index+1));
+        let touchStart=0;
+        document.addEventListener('touchstart',event=>{touchStart=event.changedTouches[0].screenX},{passive:true});
+        document.addEventListener('touchend',event=>{const delta=event.changedTouches[0].screenX-touchStart;if(Math.abs(delta)>55)show(index+(delta<0?1:-1))},{passive:true});
+        show(0);
+      </script></body></html>
     """.trimIndent()
   }
 
@@ -78,15 +103,14 @@ class SwyftPixPptxPreviewModule : Module() {
     Regex("<p:sp\\b.*?</p:sp>", setOf(RegexOption.DOT_MATCHES_ALL)).findAll(xml).forEach { match ->
       val shape = match.value
       val bounds = extractBounds(shape, size) ?: return@forEach
-      val text = extractText(shape)
-      if (text.isBlank()) return@forEach
-
       // IMPORTANT: shape fill and text color live in different XML branches.
       // The old implementation searched the entire shape for <a:solidFill>,
       // which often found the text color and incorrectly painted the text box
       // with that color. That produced the large dark rectangles seen in the
       // PPTX preview.
       val fill = extractShapeFill(shape)
+      val text = extractText(shape)
+      if (text.isBlank() && fill == null) return@forEach
       val fontSize = extractFontSize(shape)
       val color = extractTextColor(shape) ?: "#171717"
       val bold = Regex("<a:rPr\\b[^>]*b=\"1\"|<a:defRPr\\b[^>]*b=\"1\"").containsMatchIn(shape)
@@ -117,6 +141,13 @@ class SwyftPixPptxPreviewModule : Module() {
         .append("</div>")
     }
 
+    Regex("<p:graphicFrame\\b.*?</p:graphicFrame>", setOf(RegexOption.DOT_MATCHES_ALL)).findAll(xml).forEach { match ->
+      val frame = match.value
+      val bounds = extractBounds(frame, size) ?: return@forEach
+      val table = Regex("<a:tbl\\b.*?</a:tbl>", setOf(RegexOption.DOT_MATCHES_ALL)).find(frame)?.value ?: return@forEach
+      out.append(renderTable(table, bounds))
+    }
+
     Regex("<p:pic\\b.*?</p:pic>", setOf(RegexOption.DOT_MATCHES_ALL)).findAll(xml).forEach { match ->
       val pic = match.value
       val bounds = extractBounds(pic, size) ?: return@forEach
@@ -143,7 +174,7 @@ class SwyftPixPptxPreviewModule : Module() {
   }
 
   private fun extractBounds(xml: String, size: SlideSize): Bounds? {
-    val xfrm = Regex("<a:xfrm\\b.*?</a:xfrm>", setOf(RegexOption.DOT_MATCHES_ALL)).find(xml)?.value ?: return null
+    val xfrm = Regex("<(?:a|p):xfrm\\b.*?</(?:a|p):xfrm>", setOf(RegexOption.DOT_MATCHES_ALL)).find(xml)?.value ?: return null
     val off = Regex("<a:off[^>]*x=\"(-?\\d+)\"[^>]*y=\"(-?\\d+)\"").find(xfrm) ?: return null
     val ext = Regex("<a:ext[^>]*cx=\"(\\d+)\"[^>]*cy=\"(\\d+)\"").find(xfrm) ?: return null
     val x = off.groupValues[1].toDoubleOrNull() ?: return null
@@ -156,6 +187,20 @@ class SwyftPixPptxPreviewModule : Module() {
       w / size.width * 100.0,
       h / size.height * 100.0
     )
+  }
+
+  private fun renderTable(table: String, bounds: Bounds): String {
+    val rows = Regex("<a:tr\\b.*?</a:tr>", setOf(RegexOption.DOT_MATCHES_ALL)).findAll(table).map { row ->
+      Regex("<a:tc\\b.*?</a:tc>", setOf(RegexOption.DOT_MATCHES_ALL)).findAll(row.value).map { cell ->
+        extractText(cell.value)
+      }.toList()
+    }.toList()
+    if (rows.isEmpty()) return ""
+    val style = "left:${bounds.x}%;top:${bounds.y}%;width:${bounds.w}%;height:${bounds.h}%;"
+    val htmlRows = rows.joinToString("") { row ->
+      "<tr>" + row.joinToString("") { text -> "<td>${escapeHtml(text)}</td>" } + "</tr>"
+    }
+    return "<div class=\"table-frame\" style=\"$style\"><table class=\"ppt-table\"><tbody>$htmlRows</tbody></table></div>"
   }
 
   private fun extractText(xml: String): String {

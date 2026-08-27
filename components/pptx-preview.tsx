@@ -24,7 +24,7 @@ export function PptxPreview({ item, thumbnail = false }: PptxPreviewProps) {
         return;
       }
       const prepared = thumbnail
-        ? result.replace('</head>', '<style>.slide:not(:first-child){display:none}.slide{margin:0 auto}</style></head>')
+        ? result.replace('</head>', '<style>.pptx-controls{display:none}.slide{margin:0 auto}</style></head>')
         : result;
       setHtml(prepared);
       setLoading(false);
