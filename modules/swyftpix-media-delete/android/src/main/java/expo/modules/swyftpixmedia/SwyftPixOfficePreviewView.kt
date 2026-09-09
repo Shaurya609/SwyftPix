@@ -18,7 +18,9 @@ class SwyftPixOfficePreviewView(context: Context, appContext: AppContext) : Expo
     webViewClient = WebViewClient()
     webChromeClient = WebChromeClient()
     settings.apply {
-      javaScriptEnabled = false
+      // DOCX/XLSX markup is generated locally from the selected file. XLSX
+      // uses a tiny local click handler to switch between worksheet tabs.
+      javaScriptEnabled = true
       domStorageEnabled = false
       allowFileAccess = false
       allowContentAccess = false
