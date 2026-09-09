@@ -457,6 +457,11 @@ class SwyftPixOfficePreviewModule : Module() {
   private fun xmlUnescape(value: String): String = value
     .replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
     .replace("&quot;", "\"").replace("&apos;", "'")
+    .replace(Regex("&#(x[0-9A-Fa-f]+|\\d+);")) { match ->
+      val token = match.groupValues[1]
+      val codePoint = if (token.startsWith("x", ignoreCase = true)) token.substring(1).toIntOrNull(16) else token.toIntOrNull()
+      codePoint?.let { String(Character.toChars(it)) } ?: match.value
+    }
 
   private fun escapeHtml(value: String): String = value
     .replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
