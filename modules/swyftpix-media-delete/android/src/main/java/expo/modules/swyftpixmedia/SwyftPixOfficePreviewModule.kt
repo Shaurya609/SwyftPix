@@ -243,6 +243,26 @@ class SwyftPixOfficePreviewModule : Module() {
     return widths
   }
 
+  private fun readRelationships(zip: ZipFile, sourceName: String): Map<String, String> {
+    val relationsPath = sourceName.substringBeforeLast('/') + "/_rels/" + sourceName.substringAfterLast('/') + ".rels"
+    val xml = readZipText(zip, relationsPath) ?: return emptyMap()
+    return Regex("<Relationship\\b[^>]*Id=\"([^\"]+)\"[^>]*Target=\"([^\"]+)\"", RegexOption.DOT_MATCHES_ALL)
+      .findAll(xml)
+      .associate { it.groupValues[1] to it.groupValues[2] }
+  }
+
+  private fun normalizeZipPath(path: String): String {
+    val parts = ArrayDeque<String>()
+    path.replace('\\', '/').split('/').forEach { part ->
+      when (part) {
+        "", "." -> Unit
+        ".." -> if (parts.isNotEmpty()) parts.removeLast()
+        else -> parts.addLast(part)
+      }
+    }
+    return parts.joinToString("/")
+  }
+
   private fun cellLocation(reference: String): Pair<Int, Int>? {
     val match = Regex("([A-Z]+)(\\d+)", RegexOption.IGNORE_CASE).matchEntire(reference) ?: return null
     var column = 0
