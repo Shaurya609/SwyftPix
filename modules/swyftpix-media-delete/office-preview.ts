@@ -4,6 +4,7 @@ import { requireNativeModule } from 'expo-modules-core';
 type OfficePreviewNativeModule = {
   readOfficeDocument(uri: string, type: 'docx' | 'xlsx' | 'pptx', maxChars: number): Promise<string | null>;
   renderDocxHtml(uri: string): Promise<string | null>;
+  renderXlsxHtml(uri: string, thumbnail: boolean): Promise<string | null>;
 };
 
 export async function readOfficeDocument(
@@ -28,6 +29,17 @@ export async function renderDocxHtml(uri: string): Promise<string | null> {
     return await native.renderDocxHtml(uri);
   } catch (error) {
     console.warn('[SwyftPixOfficePreview] DOCX visual rendering failed:', error);
+    return null;
+  }
+}
+
+export async function renderXlsxHtml(uri: string, thumbnail = false): Promise<string | null> {
+  if (Platform.OS !== 'android') return null;
+  try {
+    const native = requireNativeModule<OfficePreviewNativeModule>('SwyftPixOfficePreview');
+    return await native.renderXlsxHtml(uri, thumbnail);
+  } catch (error) {
+    console.warn('[SwyftPixOfficePreview] XLSX visual rendering failed:', error);
     return null;
   }
 }

@@ -7,7 +7,7 @@ import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-na
 import { MockMediaItem } from '../types/media';
 import { formatFileSize, formatDate } from '../utils/formatters';
 import { getPdfPageCount, readTextFile, renderPdfPage } from '../modules/swyftpix-media-delete';
-import { readOfficeDocument, renderDocxHtml } from '../modules/swyftpix-media-delete/office-preview';
+import { readOfficeDocument, renderDocxHtml, renderXlsxHtml } from '../modules/swyftpix-media-delete/office-preview';
 import { renderPptxHtml } from '../modules/swyftpix-media-delete/pptx-preview';
 import SwyftPixOfficePreviewView from '../modules/swyftpix-media-delete/src/SwyftPixOfficePreviewView';
 import SwyftPixPptxPreviewView from '../modules/swyftpix-media-delete/src/SwyftPixPptxPreviewView';
@@ -26,17 +26,19 @@ export function DocumentPreview({ item, thumbnail = false }: DocumentPreviewProp
   const { width } = useWindowDimensions();
   const isPdf = isPdfDocument(item); const textType = getTextDocumentType(item); const officeType = getOfficeType(item); const isText = !!textType; const isOffice = !!officeType;
   const [pageCount, setPageCount] = useState(0); const [pageIndex, setPageIndex] = useState(0); const [pageUri, setPageUri] = useState<string | null>(null);
-  const [textContent, setTextContent] = useState<string | null>(null); const [officeContent, setOfficeContent] = useState<string | null>(null); const [docxHtml, setDocxHtml] = useState<string | null>(null); const [pptxHtml, setPptxHtml] = useState<string | null>(null);
+  const [textContent, setTextContent] = useState<string | null>(null); const [officeContent, setOfficeContent] = useState<string | null>(null); const [docxHtml, setDocxHtml] = useState<string | null>(null); const [xlsxHtml, setXlsxHtml] = useState<string | null>(null); const [pptxHtml, setPptxHtml] = useState<string | null>(null);
   const [loading, setLoading] = useState(isPdf || isText || isOffice);
   const scale = useSharedValue(1); const savedScale = useSharedValue(1); const translateX = useSharedValue(0); const translateY = useSharedValue(0); const startX = useSharedValue(0); const startY = useSharedValue(0);
   const resetZoom = () => { scale.value = withSpring(1, { damping: 18, stiffness: 220 }); savedScale.value = 1; translateX.value = withSpring(0, { damping: 18, stiffness: 220 }); translateY.value = withSpring(0, { damping: 18, stiffness: 220 }); startX.value = 0; startY.value = 0; };
 
   useEffect(() => {
     let cancelled = false;
-    setPageIndex(0); setPageCount(0); setPageUri(null); setTextContent(null); setOfficeContent(null); setDocxHtml(null); setPptxHtml(null); setLoading(isPdf || isText || isOffice); resetZoom();
+    setPageIndex(0); setPageCount(0); setPageUri(null); setTextContent(null); setOfficeContent(null); setDocxHtml(null); setXlsxHtml(null); setPptxHtml(null); setLoading(isPdf || isText || isOffice); resetZoom();
     if (isOffice && officeType) {
       if (officeType === 'docx') {
         renderDocxHtml(item.uri).then(html => { if (!cancelled) { setDocxHtml(html); setLoading(false); } }).catch(() => { if (!cancelled) { setDocxHtml(null); setLoading(false); } });
+      } else if (officeType === 'xlsx') {
+        renderXlsxHtml(item.uri, thumbnail).then(html => { if (!cancelled) { setXlsxHtml(html); setLoading(false); } }).catch(() => { if (!cancelled) { setXlsxHtml(null); setLoading(false); } });
       } else if (officeType === 'pptx') {
         renderPptxHtml(item.uri).then(html => { if (!cancelled) { setPptxHtml(html); setLoading(false); } }).catch(() => { if (!cancelled) { setPptxHtml(null); setLoading(false); } });
       } else {
@@ -61,6 +63,7 @@ export function DocumentPreview({ item, thumbnail = false }: DocumentPreviewProp
     if (isPdf && pageUri) return <View style={styles.thumbnailContainer}><Image source={{ uri: pageUri }} style={styles.thumbnailPage} contentFit="contain" /></View>;
     if (isText && textContent) return <View style={styles.thumbnailContainer}><View style={styles.textThumbnail}><Text style={styles.textThumbnailContent} numberOfLines={7}>{textContent}</Text></View></View>;
     if (isOffice && officeType === 'docx' && docxHtml) return <View style={styles.nativeOfficeThumbnail}><SwyftPixOfficePreviewView html={docxHtml} style={styles.nativeOfficeFill} /></View>;
+    if (isOffice && officeType === 'xlsx' && xlsxHtml) return <View style={styles.nativeOfficeThumbnail}><SwyftPixOfficePreviewView html={xlsxHtml} style={styles.nativeOfficeFill} /></View>;
     if (isOffice && officeType === 'pptx' && pptxHtml) return <View style={styles.nativeOfficeThumbnail}><SwyftPixPptxPreviewView html={pptxHtml} style={styles.nativeOfficeFill} /></View>;
     if (isOffice && officeContent) return <View style={styles.thumbnailContainer}><View style={styles.officeThumbnail}><Text style={styles.officeThumbnailTitle}>{officeLabel(officeType!)}</Text><Text style={styles.officeThumbnailContent} numberOfLines={8}>{officeContent}</Text></View></View>;
     if ((isPdf || isText || isOffice) && loading) return <View style={styles.thumbnailContainer}><ActivityIndicator size="large" color="#0A7EA4" /></View>;
@@ -69,6 +72,7 @@ export function DocumentPreview({ item, thumbnail = false }: DocumentPreviewProp
 
   if (isPdf && pageUri) return <GestureHandlerRootView style={styles.root}><View style={styles.container}><View style={styles.viewerWrap}><GestureDetector gesture={gesture}><Animated.View style={styles.gestureArea}><AnimatedImage source={{ uri: pageUri }} style={[styles.page, pageAnimatedStyle]} contentFit="contain" /></Animated.View></GestureDetector>{pageCount > 1 ? <View style={styles.pageControls}><TouchableOpacity style={styles.pageButton} disabled={pageIndex === 0 || loading} onPress={() => goToPage(pageIndex - 1)}><MaterialIcons name="chevron-left" size={28} color={pageIndex === 0 || loading ? '#666666' : '#FFFFFF'} /></TouchableOpacity><Text style={styles.pageLabel}>Page {pageIndex + 1} of {pageCount}</Text><TouchableOpacity style={styles.pageButton} disabled={pageIndex === pageCount - 1 || loading} onPress={() => goToPage(pageIndex + 1)}><MaterialIcons name="chevron-right" size={28} color={pageIndex === pageCount - 1 || loading ? '#666666' : '#FFFFFF'} /></TouchableOpacity></View> : null}<View style={styles.zoomHint}><MaterialIcons name="zoom-in" size={16} color="#FFFFFF" /><Text style={styles.zoomHintText}>Pinch to zoom</Text></View></View></View></GestureHandlerRootView>;
   if (isOffice && officeType === 'docx' && docxHtml) return <View style={styles.nativeOfficeViewer}><SwyftPixOfficePreviewView html={docxHtml} style={styles.nativeOfficeFill} /></View>;
+  if (isOffice && officeType === 'xlsx' && xlsxHtml) return <View style={styles.nativeOfficeViewer}><SwyftPixOfficePreviewView html={xlsxHtml} style={styles.nativeOfficeFill} /></View>;
   if (isOffice && officeType === 'pptx' && pptxHtml) return <View style={styles.nativeOfficeViewer}><SwyftPixPptxPreviewView html={pptxHtml} style={styles.nativeOfficeFill} /></View>;
   if (isText && textContent) return <View style={styles.textViewer}><ScrollView contentContainerStyle={styles.textScrollContent} showsVerticalScrollIndicator><Text style={styles.textContent}>{textContent}</Text></ScrollView></View>;
   if (isOffice && officeContent) return <View style={styles.officeViewer}><View style={styles.officeHeader}><MaterialIcons name={officeIcon(officeType!) as any} size={24} color="#FFFFFF" /><Text style={styles.officeHeaderText}>{officeLabel(officeType!)} PREVIEW</Text></View><ScrollView contentContainerStyle={styles.officeScroll} showsVerticalScrollIndicator><Text style={styles.officeContent}>{officeContent}</Text></ScrollView></View>;
