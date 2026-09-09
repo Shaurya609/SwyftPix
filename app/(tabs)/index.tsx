@@ -91,11 +91,7 @@ export default function HomeScreen() {
       ]);
       return;
     }
-    if (Platform.OS === 'android' && !hasUserFileAccess()) {
-      const opened = await requestUserDirectoryAccess();
-      if (!opened) Alert.alert('Open storage settings', 'Android could not open the storage-access page. Open SwyftPix settings and allow storage access, then return here.');
-    }
-    setHasFileAccess(hasUserFileAccess());
+    setHasFileAccess(mediaGranted);
   }, []);
 
   const filterItems = useCallback((source: MockMediaItem[], category: HomeCategory | null, reviewedIds: Set<string>) => {
