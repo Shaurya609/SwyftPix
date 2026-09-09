@@ -1,5 +1,5 @@
 import React, { useState, useRef, useMemo, useEffect, useCallback } from 'react';
-import { StyleSheet, View, Text, TouchableOpacity, ActivityIndicator, Alert, Platform, ScrollView } from 'react-native';
+import { StyleSheet, View, Text, TouchableOpacity, ActivityIndicator, Alert, Linking, Platform, ScrollView } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from 'expo-router';
@@ -95,8 +95,16 @@ export default function HomeScreen() {
   const completeStorageSetup = useCallback(async () => {
     const mediaGranted = await checkAndRequestPermissions();
     setHasPermission(mediaGranted);
-    if (mediaGranted && Platform.OS === 'android' && !hasUserFileAccess()) {
-      await requestUserDirectoryAccess();
+    if (!mediaGranted) {
+      Alert.alert('Allow media access', 'Open Android settings and allow SwyftPix access to photos, videos and music. Then return here to continue.', [
+        { text: 'Not now', style: 'cancel' },
+        { text: 'Open Android Settings', onPress: () => { Linking.openSettings().catch(() => undefined); } },
+      ]);
+      return;
+    }
+    if (Platform.OS === 'android' && !hasUserFileAccess()) {
+      const opened = await requestUserDirectoryAccess();
+      if (!opened) Alert.alert('Open storage settings', 'Android could not open the storage-access page. Open SwyftPix settings and allow storage access, then return here.');
     }
     setHasFileAccess(hasUserFileAccess());
   }, []);

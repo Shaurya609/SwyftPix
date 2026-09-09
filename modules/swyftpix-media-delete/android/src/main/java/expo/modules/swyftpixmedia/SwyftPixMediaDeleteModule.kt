@@ -60,13 +60,20 @@ class SwyftPixMediaDeleteModule : Module() {
     Function("requestAllFilesAccess") {
       if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return@Function true
       val activity = appContext.activityProvider?.currentActivity ?: return@Function false
+      val packageUri = Uri.parse("package:${context.packageName}")
       try {
-        val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, Uri.parse("package:${context.packageName}"))
-        activity.startActivity(intent)
+        activity.startActivity(Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, packageUri))
         true
       } catch (error: Exception) {
-        Log.e(TAG, "Could not open All Files Access settings", error)
-        false
+        // Some Android builds do not expose the per-app page. Their global
+        // All Files Access page still lets the user enable SwyftPix.
+        try {
+          activity.startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
+          true
+        } catch (fallbackError: Exception) {
+          Log.e(TAG, "Could not open All Files Access settings", fallbackError)
+          false
+        }
       }
     }
 
