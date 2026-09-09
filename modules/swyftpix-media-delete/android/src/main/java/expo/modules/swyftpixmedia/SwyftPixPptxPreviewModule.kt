@@ -59,6 +59,8 @@ class SwyftPixPptxPreviewModule : Module() {
 
     if (entries.isEmpty()) return ""
 
+    val slideRatio = "%.8f".format(java.util.Locale.US, size.width / size.height)
+
     val slides = entries.mapIndexed { index, entry ->
       renderSlide(zip, entry.name, index + 1, size)
     }.joinToString("")
@@ -71,14 +73,14 @@ class SwyftPixPptxPreviewModule : Module() {
         html,body{margin:0;padding:0;width:100%;height:100%;background:#242424;overflow:hidden}
         body{font-family:Arial,Helvetica,sans-serif}
         #slides{width:100%;height:100%;display:flex;align-items:center;justify-content:center}
-        .slide{display:none;position:relative;width:min(1100px,calc(100vw - 16px));aspect-ratio:${size.width}/${size.height};margin:0 auto;background:#fff;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.38)}
+        .slide{display:none;position:relative;margin:0 auto;background:#fff;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.38);--pptx-scale:1}
         .slide.active{display:block}
         .shape{position:absolute;overflow:hidden;white-space:pre-wrap;word-break:break-word}
         .picture{position:absolute;object-fit:contain}
         .connector{position:absolute;height:0;border-top-style:solid;transform-origin:0 0;z-index:2}
         .connector-arrow{position:absolute;right:-1px;top:-5px;width:0;height:0;border-top:5px solid transparent;border-bottom:5px solid transparent;border-left:8px solid currentColor}
         .table-frame{position:absolute;overflow:hidden;background:rgba(255,255,255,.92)}
-        .ppt-table{width:100%;height:100%;border-collapse:collapse;table-layout:fixed;color:#171717;font-size:1.45vw;line-height:1.1}
+        .ppt-table{width:100%;height:100%;border-collapse:collapse;table-layout:fixed;color:#171717;font-size:calc(1.45vw * var(--pptx-scale));line-height:1.1}
         .ppt-table td{border:1px solid rgba(0,0,0,.35);padding:2px;vertical-align:middle;white-space:pre-wrap;word-break:break-word}
         .slide-number{position:absolute;right:10px;bottom:7px;font-size:10px;color:rgba(0,0,0,.45);z-index:1000}
         .pptx-controls{position:fixed;z-index:2000;left:50%;bottom:12px;transform:translateX(-50%);display:flex;align-items:center;gap:10px;padding:6px 10px;border-radius:22px;background:rgba(0,0,0,.78);color:#fff;font-size:12px}
@@ -89,6 +91,20 @@ class SwyftPixPptxPreviewModule : Module() {
         const slides=Array.from(document.querySelectorAll('.slide'));
         const status=document.getElementById('slide-status');
         let index=0;
+        const slideRatio=$slideRatio;
+        function fitSlides(){
+          const availableWidth=Math.max(1,window.innerWidth-16);
+          // Leave room for the navigation control so it cannot cover a slide footer.
+          const availableHeight=Math.max(1,window.innerHeight-58);
+          const width=Math.min(availableWidth,availableHeight*slideRatio);
+          const height=width/slideRatio;
+          const scale=width/Math.max(1,window.innerWidth);
+          slides.forEach(slide=>{
+            slide.style.width=width+'px';
+            slide.style.height=height+'px';
+            slide.style.setProperty('--pptx-scale',scale.toFixed(6));
+          });
+        }
         function show(next){
           if(!slides.length)return;
           index=(next+slides.length)%slides.length;
@@ -100,6 +116,8 @@ class SwyftPixPptxPreviewModule : Module() {
         let touchStart=0;
         document.addEventListener('touchstart',event=>{touchStart=event.changedTouches[0].screenX},{passive:true});
         document.addEventListener('touchend',event=>{const delta=event.changedTouches[0].screenX-touchStart;if(Math.abs(delta)>55)show(index+(delta<0?1:-1))},{passive:true});
+        window.addEventListener('resize',fitSlides);
+        fitSlides();
         show(0);
       </script></body></html>
     """.trimIndent()
@@ -148,7 +166,7 @@ class SwyftPixPptxPreviewModule : Module() {
       val responsiveFont = (fontSize * 1.333 / 11.0).coerceAtLeast(0.9)
       val style = buildString {
         append("left:${bounds.x}%;top:${bounds.y}%;width:${bounds.w}%;height:${bounds.h}%;")
-        append("padding:2px 4px;color:$color;font-size:${"%.3f".format(java.util.Locale.US, responsiveFont)}vw;line-height:1.15;text-align:$align;")
+        append("padding:2px 4px;color:$color;font-size:calc(${"%.3f".format(java.util.Locale.US, responsiveFont)}vw * var(--pptx-scale));line-height:1.15;text-align:$align;")
         if (fill != null) append("background:$fill;")
         if (bold) append("font-weight:700;")
         if (italic) append("font-style:italic;")
