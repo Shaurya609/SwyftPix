@@ -66,6 +66,8 @@ class SwyftPixPptxPreviewModule : Module() {
         .slide.active{display:block}
         .shape{position:absolute;overflow:hidden;white-space:pre-wrap;word-break:break-word}
         .picture{position:absolute;object-fit:contain}
+        .connector{position:absolute;height:0;border-top-style:solid;transform-origin:0 0;z-index:2}
+        .connector-arrow{position:absolute;right:-1px;top:-5px;width:0;height:0;border-top:5px solid transparent;border-bottom:5px solid transparent;border-left:8px solid currentColor}
         .table-frame{position:absolute;overflow:hidden;background:rgba(255,255,255,.92)}
         .ppt-table{width:100%;height:100%;border-collapse:collapse;table-layout:fixed;color:#171717;font-size:1.45vw;line-height:1.1}
         .ppt-table td{border:1px solid rgba(0,0,0,.35);padding:2px;vertical-align:middle;white-space:pre-wrap;word-break:break-word}
@@ -97,6 +99,9 @@ class SwyftPixPptxPreviewModule : Module() {
   private fun renderSlide(zip: ZipFile, slideName: String, number: Int, size: SlideSize): String {
     val xml = zip.getInputStream(zip.getEntry(slideName)).bufferedReader().readText()
     val rels = readRelationships(zip, slideName)
+    val layoutName = rels.values.firstOrNull { it.contains("slideLayouts/") }?.let {
+      normalizeZipPath(slideName.substringBeforeLast('/') + "/" + it)
+    }
     val groups = findGroupRanges(xml)
     val out = StringBuilder("<section class=\"slide\">")
 
@@ -106,7 +111,9 @@ class SwyftPixPptxPreviewModule : Module() {
 
     Regex("<p:sp\\b.*?</p:sp>", setOf(RegexOption.DOT_MATCHES_ALL)).findAll(xml).forEach { match ->
       val shape = match.value
-      val bounds = extractBounds(shape, size, transformsFor(groups, match.range.first)) ?: return@forEach
+      val bounds = extractBounds(shape, size, transformsFor(groups, match.range.first))
+        ?: resolvePlaceholderBounds(zip, layoutName, shape, size)
+        ?: return@forEach
       // IMPORTANT: shape fill and text color live in different XML branches.
       // The old implementation searched the entire shape for <a:solidFill>,
       // which often found the text color and incorrectly painted the text box
@@ -150,6 +157,17 @@ class SwyftPixPptxPreviewModule : Module() {
       val bounds = extractBounds(frame, size, transformsFor(groups, match.range.first)) ?: return@forEach
       val table = Regex("<a:tbl\\b.*?</a:tbl>", setOf(RegexOption.DOT_MATCHES_ALL)).find(frame)?.value ?: return@forEach
       out.append(renderTable(table, bounds))
+    }
+
+    Regex("<p:cxnSp\\b.*?</p:cxnSp>", setOf(RegexOption.DOT_MATCHES_ALL)).findAll(xml).forEach { match ->
+      val connector = match.value
+      val bounds = extractBounds(connector, size, transformsFor(groups, match.range.first)) ?: return@forEach
+      val angle = Math.toDegrees(Math.atan2(bounds.h, bounds.w.coerceAtLeast(0.0001)))
+      val length = Math.hypot(bounds.w, bounds.h)
+      val color = extractShapeFill(connector) ?: "#6F6F6F"
+      val lineWidth = (Regex("<a:ln[^>]*w=\"(\\d+)\"").find(connector)?.groupValues?.get(1)?.toDoubleOrNull() ?: 12700.0) / 12700.0
+      val arrow = if (connector.contains("<a:headEnd") || connector.contains("<a:tailEnd")) "<i class=\"connector-arrow\"></i>" else ""
+      out.append("<div class=\"connector\" style=\"left:${bounds.x}%;top:${bounds.y}%;width:${length}%;border-top-width:${lineWidth.coerceIn(1.0, 4.0)}px;border-top-color:$color;color:$color;transform:rotate(${angle}deg)\">$arrow</div>")
     }
 
     Regex("<p:pic\\b.*?</p:pic>", setOf(RegexOption.DOT_MATCHES_ALL)).findAll(xml).forEach { match ->
@@ -233,6 +251,16 @@ class SwyftPixPptxPreviewModule : Module() {
 
   private fun transformsFor(groups: List<GroupRange>, position: Int): List<GroupTransform> =
     groups.filter { position in it.start..it.end }.sortedByDescending { it.start }.map { it.transform }
+
+  private fun resolvePlaceholderBounds(zip: ZipFile, layoutName: String?, shape: String, size: SlideSize): Bounds? {
+    val index = Regex("<p:ph\\b[^>]*idx=\"([^\"]+)\"").find(shape)?.groupValues?.get(1) ?: return null
+    val layout = layoutName?.let { zip.getEntry(it) } ?: return null
+    val xml = zip.getInputStream(layout).bufferedReader().readText()
+    val placeholder = Regex("<p:sp\\b.*?</p:sp>", setOf(RegexOption.DOT_MATCHES_ALL)).findAll(xml)
+      .firstOrNull { it.value.contains("<p:ph") && Regex("<p:ph\\b[^>]*idx=\"${Regex.escape(index)}\"").containsMatchIn(it.value) }
+      ?.value ?: return null
+    return extractBounds(placeholder, size)
+  }
 
   private fun renderTable(table: String, bounds: Bounds): String {
     val rows = Regex("<a:tr\\b.*?</a:tr>", setOf(RegexOption.DOT_MATCHES_ALL)).findAll(table).map { row ->
