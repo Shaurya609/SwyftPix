@@ -1,11 +1,15 @@
 import * as MediaLibrary from 'expo-media-library';
 import { File } from 'expo-file-system';
+import { Platform } from 'react-native';
 import { MockMediaItem, MediaType } from '../types/media';
-import { listSharedFiles } from '../modules/swyftpix-media-delete';
+import { hasAllFilesAccess, listSharedFiles } from '../modules/swyftpix-media-delete';
 
 let albumCache: Map<string, string> | null = null;
 
 export async function checkAndRequestPermissions(): Promise<boolean> {
+  // Android uses one All Files Access setting for every category. Do not also
+  // request the separate photo/video/audio runtime permissions.
+  if (Platform.OS === 'android') return hasAllFilesAccess();
   try {
     const { status, canAskAgain } = await MediaLibrary.getPermissionsAsync(false, ['photo', 'video', 'audio']);
     if (status === 'granted') return true;
@@ -109,15 +113,8 @@ export interface FetchPageResult {
 }
 
 export type DeviceMediaCategory = 'photo' | 'video' | 'audio' | 'document' | 'archive' | 'apk' | 'other' | 'all';
-type NativeFileCategory = 'document' | 'archive' | 'apk' | 'other' | 'all';
-
-function nativeFileCategory(category: DeviceMediaCategory): NativeFileCategory {
-  return category === 'document' || category === 'archive' || category === 'apk' || category === 'other' ? category : 'all';
-}
-
 async function mapSharedFiles(category: DeviceMediaCategory): Promise<MockMediaItem[]> {
-  const nativeCategory = nativeFileCategory(category);
-  const nativeFiles = listSharedFiles(nativeCategory, 100);
+  const nativeFiles = listSharedFiles(category, 100);
   const seen = new Set<string>();
 
   return nativeFiles.filter(file => {
@@ -135,6 +132,7 @@ async function mapSharedFiles(category: DeviceMediaCategory): Promise<MockMediaI
       fileName: file.fileName,
       uri: file.uri,
       relativePath: file.relativePath,
+      mediaType: file.fileType as MediaLibrary.MediaTypeValue,
       category: file.fileType,
     }),
     uri: file.uri,
@@ -145,6 +143,13 @@ async function mapSharedFiles(category: DeviceMediaCategory): Promise<MockMediaI
 
 export async function fetchDeviceMediaPage(limit: number, afterAssetId?: string, category: DeviceMediaCategory = 'all'): Promise<FetchPageResult> {
   try {
+    // All Files Access is deliberately the single Android access route. The
+    // native MediaStore query returns every review category without a second
+    // Android photo/video/audio permission prompt.
+    if (Platform.OS === 'android') {
+      if (!hasAllFilesAccess()) return { items: [], endCursor: '', hasNextPage: false };
+      return { items: (await mapSharedFiles(category)).slice(0, limit), endCursor: '', hasNextPage: false };
+    }
     const isFileCategory = category === 'document' || category === 'archive' || category === 'apk' || category === 'other';
     if (isFileCategory) return { items: (await mapSharedFiles(category)).slice(0, limit), endCursor: '', hasNextPage: false };
 

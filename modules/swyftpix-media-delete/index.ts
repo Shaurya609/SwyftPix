@@ -4,7 +4,7 @@ import { requireNativeModule } from 'expo-modules-core';
 type NativeSharedFile = {
   id: string;
   fileName: string;
-  fileType: 'document' | 'archive' | 'apk' | 'other';
+  fileType: 'photo' | 'video' | 'audio' | 'document' | 'archive' | 'apk' | 'other';
   mimeType: string;
   fileSize: number;
   dateModified: number;
@@ -14,27 +14,13 @@ type NativeSharedFile = {
 
 type NativeMediaDeleteModule = {
   deleteMediaByPath(path: string): Promise<boolean>;
-  canManageMedia(): boolean;
-  requestMediaManagementAccess(): boolean;
   hasAllFilesAccess(): boolean;
   requestAllFilesAccess(): boolean;
-  listSharedFiles(category: 'document' | 'archive' | 'apk' | 'other' | 'all', limit: number): NativeSharedFile[];
+  listSharedFiles(category: 'photo' | 'video' | 'audio' | 'document' | 'archive' | 'apk' | 'other' | 'all', limit: number): NativeSharedFile[];
   renderPdfPage(uri: string, pageIndex: number, maxWidth: number): Promise<string | null>;
   getPdfPageCount(uri: string): Promise<number>;
   readTextFile(uri: string, maxChars: number): Promise<string | null>;
 };
-
-export function canManageMedia(): boolean {
-  const nativeModule = getNativeMediaDelete();
-  if (!nativeModule) return false;
-  return nativeModule.canManageMedia();
-}
-
-export function requestMediaManagementAccess(): boolean {
-  const nativeModule = getNativeMediaDelete();
-  if (!nativeModule) return false;
-  return nativeModule.requestMediaManagementAccess();
-}
 
 export function hasAllFilesAccess(): boolean {
   const nativeModule = getNativeMediaDelete();
@@ -59,7 +45,7 @@ export function requestAllFilesAccess(): boolean {
 }
 
 export function listSharedFiles(
-  category: 'document' | 'archive' | 'apk' | 'apks' | 'other' | 'all',
+  category: 'photo' | 'video' | 'audio' | 'document' | 'archive' | 'apk' | 'apks' | 'other' | 'all',
   limit = 40
 ): NativeSharedFile[] {
   const nativeModule = getNativeMediaDelete();

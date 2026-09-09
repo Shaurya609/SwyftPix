@@ -35,24 +35,6 @@ class SwyftPixMediaDeleteModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("SwyftPixMediaDelete")
 
-    Function("canManageMedia") {
-      if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return@Function false
-      MediaStore.canManageMedia(context)
-    }
-
-    Function("requestMediaManagementAccess") {
-      if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return@Function false
-      val activity = appContext.activityProvider?.currentActivity ?: return@Function false
-      try {
-        val intent = Intent(Settings.ACTION_REQUEST_MANAGE_MEDIA, Uri.parse("package:${context.packageName}"))
-        activity.startActivity(intent)
-        true
-      } catch (error: Exception) {
-        Log.e(TAG, "Could not open Media management settings", error)
-        false
-      }
-    }
-
     Function("hasAllFilesAccess") {
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) Environment.isExternalStorageManager() else true
     }
@@ -248,7 +230,7 @@ class SwyftPixMediaDeleteModule : Module() {
           val relativePath = cursor.getString(relativeIndex) ?: ""
           if (!isSafeSharedFile(relativePath, name)) continue
           val fileCategory = classifyFile(name, mimeType)
-          if (fileCategory != category) continue
+          if (category != "all" && fileCategory != category) continue
           val uri = ContentUris.withAppendedId(collection, id)
           results.add(Bundle().apply {
             putString("id", "file:$id")
@@ -271,6 +253,11 @@ class SwyftPixMediaDeleteModule : Module() {
 
   private fun classifyFile(fileName: String, mimeType: String): String {
     val extension = fileName.substringAfterLast('.', "").lowercase()
+    when {
+      mimeType.startsWith("image/") -> return "photo"
+      mimeType.startsWith("video/") -> return "video"
+      mimeType.startsWith("audio/") -> return "audio"
+    }
     return when (extension) {
       "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "csv", "rtf", "odt", "ods", "odp", "epub" -> "document"
       "zip", "rar", "7z", "tar", "gz", "bz2", "xz", "tgz" -> "archive"

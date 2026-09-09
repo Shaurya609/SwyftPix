@@ -22,9 +22,7 @@
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
       "permissions": [
-        "android.permission.MANAGE_EXTERNAL_STORAGE",
-        "android.permission.MANAGE_MEDIA",
-        "android.permission.READ_EXTERNAL_STORAGE"
+        "android.permission.MANAGE_EXTERNAL_STORAGE"
       ]
     },
     "web": {

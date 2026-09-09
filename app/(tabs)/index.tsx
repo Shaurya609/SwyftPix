@@ -14,7 +14,6 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 import { MockMediaItem } from '@/types/media';
 import { checkAndRequestPermissions, fetchDeviceMediaPage } from '@/utils/device-media';
 import { hasUserFileAccess, requestUserDirectoryAccess } from '@/utils/file-access';
-import { canManageMedia, requestMediaManagementAccess } from '@/modules/swyftpix-media-delete';
 import { initialize, trashAsset, restoreAsset, keepAsset, undoKeep, getReviewedAssetIds, getTrashedAssets } from '@/utils/trash-service';
 
 interface SwipeHistory { item: MockMediaItem; direction: 'left' | 'right'; }
@@ -51,34 +50,16 @@ export default function HomeScreen() {
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
   const [hasFileAccess, setHasFileAccess] = useState(false);
   const [isInitialSetup, setIsInitialSetup] = useState(true);
-  const [hasMediaManagementAccess, setHasMediaManagementAccess] = useState<boolean | null>(null);
   const [endCursor, setEndCursor] = useState<string | undefined>(undefined);
   const [hasNextPage, setHasNextPage] = useState(false);
   const [isLoadingDeviceMedia, setIsLoadingDeviceMedia] = useState(false);
   const sessionReviewedIdsRef = useRef<Set<string>>(new Set());
   const loadRequestRef = useRef(0);
 
-  const refreshMediaManagementAccess = useCallback(() => {
-    if (Platform.OS !== 'android' || Platform.Version < 31) { setHasMediaManagementAccess(true); return true; }
-    const granted = canManageMedia();
-    setHasMediaManagementAccess(granted);
-    return granted;
-  }, []);
-
   const refreshFileAccess = useCallback(() => {
     const granted = hasUserFileAccess();
     setHasFileAccess(granted);
     return granted;
-  }, []);
-
-  const requestMediaManagementSetup = useCallback(() => {
-    if (Platform.OS !== 'android' || Platform.Version < 31) return true;
-    if (canManageMedia()) { setHasMediaManagementAccess(true); return true; }
-    Alert.alert('Allow media management', 'SwyftPix needs one-time Android media-management access so it can permanently delete items from Trash without asking you for permission every time.', [
-      { text: 'Not now', style: 'cancel', onPress: () => setHasMediaManagementAccess(false) },
-      { text: 'Open Settings', onPress: () => { const opened = requestMediaManagementAccess(); if (!opened) setHasMediaManagementAccess(false); } },
-    ]);
-    return false;
   }, []);
 
   const requestFileAccessSetup = useCallback(() => {
@@ -93,6 +74,14 @@ export default function HomeScreen() {
   }, []);
 
   const completeStorageSetup = useCallback(async () => {
+    if (Platform.OS === 'android') {
+      const opened = await requestUserDirectoryAccess();
+      if (!opened) Alert.alert('Open storage settings', 'Android could not open the All Files Access page. Open SwyftPix settings and allow storage access, then return here.');
+      const granted = hasUserFileAccess();
+      setHasPermission(granted);
+      setHasFileAccess(granted);
+      return;
+    }
     const mediaGranted = await checkAndRequestPermissions();
     setHasPermission(mediaGranted);
     if (!mediaGranted) {
@@ -155,27 +144,18 @@ export default function HomeScreen() {
         const reviewedIds = await getReviewedAssetIds();
         reviewedIds.forEach(id => sessionReviewedIdsRef.current.add(id));
         setDeletedItems(await getTrashedAssets());
-        setHasFileAccess(hasUserFileAccess());
-        const granted = await checkAndRequestPermissions();
+        const granted = Platform.OS === 'android' ? hasUserFileAccess() : await checkAndRequestPermissions();
         setHasPermission(granted);
-        // The Android media prompt covers photos, videos and audio. Broad
-        // shared-storage access is needed as well so Documents, APKs and
-        // Archives never look empty on a fresh install.
-        if (granted && Platform.OS === 'android' && !hasUserFileAccess()) await requestUserDirectoryAccess();
-        setHasFileAccess(hasUserFileAccess());
-        if (!granted) setHasMediaManagementAccess(true); else refreshMediaManagementAccess();
+        setHasFileAccess(Platform.OS === 'android' ? granted : hasUserFileAccess());
       } catch (err) {
         console.error('[HomeScreen] Error initializing persistent review state:', err);
-        setHasFileAccess(hasUserFileAccess());
-        const granted = await checkAndRequestPermissions();
+        const granted = Platform.OS === 'android' ? hasUserFileAccess() : await checkAndRequestPermissions();
         setHasPermission(granted);
-        if (granted && Platform.OS === 'android' && !hasUserFileAccess()) await requestUserDirectoryAccess();
-        setHasFileAccess(hasUserFileAccess());
-        if (granted) refreshMediaManagementAccess(); else setHasMediaManagementAccess(true);
+        setHasFileAccess(Platform.OS === 'android' ? granted : hasUserFileAccess());
       } finally { setIsInitialSetup(false); }
     }
     init();
-  }, [refreshMediaManagementAccess]);
+  }, []);
 
   useFocusEffect(useCallback(() => {
     if (hasPermission === null) return;
@@ -183,8 +163,7 @@ export default function HomeScreen() {
     async function refreshAfterFocus() {
       try {
         const fileAccessGranted = refreshFileAccess();
-        const managementGranted = refreshMediaManagementAccess();
-        if (!managementGranted && hasPermission) { setItems([]); return; }
+        setHasPermission(fileAccessGranted);
         await initialize();
         const persistedTrash = await getTrashedAssets();
         if (cancelled) return;
@@ -199,7 +178,7 @@ export default function HomeScreen() {
     }
     refreshAfterFocus();
     return () => { cancelled = true; };
-  }, [hasPermission, refreshMediaManagementAccess, refreshFileAccess, selectedCategory, loadFirstPage]));
+  }, [hasPermission, refreshFileAccess, selectedCategory, loadFirstPage]));
 
   const handleSelectCategory = useCallback(async (category: HomeCategory) => {
     setSelectedCategory(category); setHistory([]); setKeptItems([]); setItems([]); setEndCursor(undefined); setHasNextPage(false); await loadFirstPage(category);
@@ -309,7 +288,7 @@ export default function HomeScreen() {
           <>
             <View style={styles.modeHeader}><TouchableOpacity onPress={handleChangeCategory} style={styles.modeBackButton} activeOpacity={0.8}><MaterialIcons name="arrow-back" size={22} color="#0a7ea4" /></TouchableOpacity><View style={styles.modeTitleContainer}><ThemedText style={styles.modeTitle} type="defaultSemiBold">{CATEGORIES.find(c => c.id === selectedCategory)?.label}</ThemedText><ThemedText style={styles.modeSubtitle} lightColor="#687076" darkColor="#9BA1A6">Swipe to keep or trash</ThemedText></View></View>
             <View style={styles.cardContainer}>
-              {hasPermission && hasMediaManagementAccess === false ? <View style={styles.emptyContainer}><View style={[styles.emptyCard, isDark ? styles.emptyCardDark : styles.emptyCardLight]}><View style={styles.emptyIconContainer}><MaterialIcons name="security" size={44} color="#0a7ea4" /></View><ThemedText style={styles.emptyTitle}>Finish Setup</ThemedText><ThemedText style={styles.emptyDescription} lightColor="#687076" darkColor="#9BA1A6">Give SwyftPix one-time media-management access. This prevents Android from showing another permission prompt every time you permanently delete an item.</ThemedText><TouchableOpacity style={styles.resetButton} onPress={requestMediaManagementSetup} activeOpacity={0.8}><ThemedText style={styles.resetButtonText}>Open Android Settings</ThemedText></TouchableOpacity></View></View> : isFileCategory(selectedCategory) && !hasFileAccess ? fileAccessCard : isLoadingDeviceMedia && items.length === 0 ? <ActivityIndicator size="large" color="#0a7ea4" /> : items.length > 0 ? <MediaReviewCard key={items[0]?.id} ref={cardRef} items={items.slice(0, 2)} onSwipeLeft={handleSwipeLeft} onSwipeRight={handleSwipeRight} onUndo={handleUndo} isDark={isDark} /> : <View style={styles.emptyContainer}><View style={[styles.emptyCard, isDark ? styles.emptyCardDark : styles.emptyCardLight]}><View style={styles.emptyIconContainer}><MaterialIcons name="check-circle" size={44} color="#0a7ea4" /></View><ThemedText style={styles.emptyTitle}>You're all caught up</ThemedText><ThemedText style={styles.emptyDescription} lightColor="#687076" darkColor="#9BA1A6">No more {CATEGORIES.find(c => c.id === selectedCategory)?.label.toLowerCase()} need review.</ThemedText><TouchableOpacity style={styles.resetButton} onPress={handleChangeCategory} activeOpacity={0.8}><ThemedText style={styles.resetButtonText}>Choose Another Category</ThemedText></TouchableOpacity></View></View>}
+              {isFileCategory(selectedCategory) && !hasFileAccess ? fileAccessCard : isLoadingDeviceMedia && items.length === 0 ? <ActivityIndicator size="large" color="#0a7ea4" /> : items.length > 0 ? <MediaReviewCard key={items[0]?.id} ref={cardRef} items={items.slice(0, 2)} onSwipeLeft={handleSwipeLeft} onSwipeRight={handleSwipeRight} onUndo={handleUndo} isDark={isDark} /> : <View style={styles.emptyContainer}><View style={[styles.emptyCard, isDark ? styles.emptyCardDark : styles.emptyCardLight]}><View style={styles.emptyIconContainer}><MaterialIcons name="check-circle" size={44} color="#0a7ea4" /></View><ThemedText style={styles.emptyTitle}>You're all caught up</ThemedText><ThemedText style={styles.emptyDescription} lightColor="#687076" darkColor="#9BA1A6">No more {CATEGORIES.find(c => c.id === selectedCategory)?.label.toLowerCase()} need review.</ThemedText><TouchableOpacity style={styles.resetButton} onPress={handleChangeCategory} activeOpacity={0.8}><ThemedText style={styles.resetButtonText}>Choose Another Category</ThemedText></TouchableOpacity></View></View>}
             </View>
           </>
         )}
