@@ -50,6 +50,7 @@ export default function HomeScreen() {
   const [selectedCategory, setSelectedCategory] = useState<HomeCategory | null>(null);
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
   const [hasFileAccess, setHasFileAccess] = useState(false);
+  const [isInitialSetup, setIsInitialSetup] = useState(true);
   const [hasMediaManagementAccess, setHasMediaManagementAccess] = useState<boolean | null>(null);
   const [endCursor, setEndCursor] = useState<string | undefined>(undefined);
   const [hasNextPage, setHasNextPage] = useState(false);
@@ -89,6 +90,15 @@ export default function HomeScreen() {
       { text: 'Not now', style: 'cancel' },
       { text: 'Open Android Settings', onPress: async () => { await requestUserDirectoryAccess(); } },
     ]);
+  }, []);
+
+  const completeStorageSetup = useCallback(async () => {
+    const mediaGranted = await checkAndRequestPermissions();
+    setHasPermission(mediaGranted);
+    if (mediaGranted && Platform.OS === 'android' && !hasUserFileAccess()) {
+      await requestUserDirectoryAccess();
+    }
+    setHasFileAccess(hasUserFileAccess());
   }, []);
 
   const filterItems = useCallback((source: MockMediaItem[], category: HomeCategory | null, reviewedIds: Set<string>) => {
@@ -140,14 +150,21 @@ export default function HomeScreen() {
         setHasFileAccess(hasUserFileAccess());
         const granted = await checkAndRequestPermissions();
         setHasPermission(granted);
+        // The Android media prompt covers photos, videos and audio. Broad
+        // shared-storage access is needed as well so Documents, APKs and
+        // Archives never look empty on a fresh install.
+        if (granted && Platform.OS === 'android' && !hasUserFileAccess()) await requestUserDirectoryAccess();
+        setHasFileAccess(hasUserFileAccess());
         if (!granted) setHasMediaManagementAccess(true); else refreshMediaManagementAccess();
       } catch (err) {
         console.error('[HomeScreen] Error initializing persistent review state:', err);
         setHasFileAccess(hasUserFileAccess());
         const granted = await checkAndRequestPermissions();
         setHasPermission(granted);
+        if (granted && Platform.OS === 'android' && !hasUserFileAccess()) await requestUserDirectoryAccess();
+        setHasFileAccess(hasUserFileAccess());
         if (granted) refreshMediaManagementAccess(); else setHasMediaManagementAccess(true);
-      }
+      } finally { setIsInitialSetup(false); }
     }
     init();
   }, [refreshMediaManagementAccess]);
@@ -271,12 +288,16 @@ export default function HomeScreen() {
     <View style={styles.emptyContainer}><View style={[styles.emptyCard, isDark ? styles.emptyCardDark : styles.emptyCardLight]}><View style={styles.emptyIconContainer}><MaterialIcons name="folder-open" size={44} color="#0a7ea4" /></View><ThemedText style={styles.emptyTitle}>Enable storage access</ThemedText><ThemedText style={styles.emptyDescription} lightColor="#687076" darkColor="#9BA1A6">SwyftPix needs Android's All Files Access to automatically find documents, APKs and archives. Protected Android system and app-private locations are excluded from scanning.</ThemedText><TouchableOpacity style={styles.resetButton} onPress={requestFileAccessSetup} activeOpacity={0.8}><ThemedText style={styles.resetButtonText}>Allow Storage Access</ThemedText></TouchableOpacity></View></View>
   );
 
+  const initialSetupCard = (
+    <View style={styles.emptyContainer}><View style={[styles.emptyCard, isDark ? styles.emptyCardDark : styles.emptyCardLight]}><View style={styles.emptyIconContainer}><MaterialIcons name="folder-shared" size={44} color="#0a7ea4" /></View><ThemedText style={styles.emptyTitle}>Set up storage access</ThemedText><ThemedText style={styles.emptyDescription} lightColor="#687076" darkColor="#9BA1A6">Allow access to photos, videos, audio, documents, APKs and archives before choosing what to clean.</ThemedText><TouchableOpacity style={styles.resetButton} onPress={completeStorageSetup} activeOpacity={0.8}><ThemedText style={styles.resetButtonText}>Allow Storage Access</ThemedText></TouchableOpacity></View></View>
+  );
+
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <ThemedView style={[styles.container, { paddingTop: insets.top + 8 }]}>
         <View style={styles.header}><View><ThemedText style={styles.headerTitle} type="title">SwyftPix</ThemedText><ThemedText style={styles.headerSubtitle} lightColor="#687076" darkColor="#9BA1A6">Clean up your storage</ThemedText></View></View>
         <StorageSummary reviewableSize={reviewableSize} reviewableCount={reviewableCount} cleanedSize={spaceSaved} />
-        {selectedCategory === null ? categorySelection : (
+        {isInitialSetup || hasPermission === null ? <View style={styles.emptyContainer}><ActivityIndicator size="large" color="#0a7ea4" /></View> : !hasPermission || !hasFileAccess ? initialSetupCard : selectedCategory === null ? categorySelection : (
           <>
             <View style={styles.modeHeader}><TouchableOpacity onPress={handleChangeCategory} style={styles.modeBackButton} activeOpacity={0.8}><MaterialIcons name="arrow-back" size={22} color="#0a7ea4" /></TouchableOpacity><View style={styles.modeTitleContainer}><ThemedText style={styles.modeTitle} type="defaultSemiBold">{CATEGORIES.find(c => c.id === selectedCategory)?.label}</ThemedText><ThemedText style={styles.modeSubtitle} lightColor="#687076" darkColor="#9BA1A6">Swipe to keep or trash</ThemedText></View></View>
             <View style={styles.cardContainer}>
