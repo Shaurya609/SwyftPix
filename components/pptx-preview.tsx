@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { MockMediaItem } from '@/types/media';
-import { renderPptxHtml } from '@/modules/swyftpix-media-delete/pptx-preview';
+import { lockPortrait, lockPptxLandscape, renderPptxHtml } from '@/modules/swyftpix-media-delete/pptx-preview';
 import SwyftPixPptxPreviewView from '@/modules/swyftpix-media-delete/src/SwyftPixPptxPreviewView';
 
 interface PptxPreviewProps {
@@ -12,6 +12,12 @@ interface PptxPreviewProps {
 export function PptxPreview({ item, thumbnail = false }: PptxPreviewProps) {
   const [html, setHtml] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (thumbnail) return;
+    lockPptxLandscape();
+    return () => lockPortrait();
+  }, [thumbnail]);
 
   useEffect(() => {
     let cancelled = false;

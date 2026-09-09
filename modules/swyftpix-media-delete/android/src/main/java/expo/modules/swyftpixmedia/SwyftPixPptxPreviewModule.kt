@@ -1,6 +1,7 @@
 package expo.modules.swyftpixmedia
 
 import android.net.Uri
+import android.content.pm.ActivityInfo
 import android.util.Base64
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
@@ -17,6 +18,8 @@ class SwyftPixPptxPreviewModule : Module() {
       Prop("html") { view: SwyftPixPptxPreviewView, html: String? -> view.loadHtml(html.orEmpty()) }
     }
     AsyncFunction("renderPptxHtml") { uriString: String -> renderPptxHtml(uriString) }
+    Function("lockLandscape") { setOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE) }
+    Function("lockPortrait") { setOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT) }
   }
 
   private data class SlideSize(val width: Double, val height: Double)
@@ -24,6 +27,12 @@ class SwyftPixPptxPreviewModule : Module() {
   private data class RawBounds(val x: Double, val y: Double, val w: Double, val h: Double)
   private data class GroupTransform(val x: Double, val y: Double, val w: Double, val h: Double, val childX: Double, val childY: Double, val childW: Double, val childH: Double)
   private data class GroupRange(val start: Int, val end: Int, val transform: GroupTransform)
+
+  private fun setOrientation(orientation: Int): Boolean {
+    val activity = appContext.activityProvider?.currentActivity ?: return false
+    activity.runOnUiThread { activity.requestedOrientation = orientation }
+    return true
+  }
 
   private fun renderPptxHtml(uriString: String): String? {
     if (!uriString.startsWith("content://")) return null
